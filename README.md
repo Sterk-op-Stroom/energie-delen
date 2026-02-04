@@ -5,8 +5,9 @@ An open project repository for energy communities: simulation code for energy sh
 ## About
 This repository supports energy communities that want to design, test, and implement sharing energy locally. 
 It brings together two things:
-•	Modular simulation code to explore policy, pricing, allocation, and behavioral choices before deploying them in the real world
-•	Real-world artifacts—contract templates, governance documents, and budgets—based on what we actually used in practice
+-	Modular simulation code to explore policy, pricing, allocation, and behavioral choices before deploying them in the real world
+-	Real-world artifacts—contract templates, governance documents, and budgets—based on what we actually used in practice
+
 The core philosophy is modularity and reuse: communities should be able to adapt pricing models, allocation rules, and organizational choices without rebuilding everything from scratch. The simulation framework is explicitly designed to make those choices visible, comparable, and debatable—technically, socially, and politically.
 
 
