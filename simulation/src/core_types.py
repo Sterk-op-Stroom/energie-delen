@@ -6,6 +6,53 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from .utils import ensure_array
+
+
+@dataclass
+class AggregatedStep:
+    """Per-timestep aggregated supply and demand totals.
+
+    Output of the Aggregator module; input to the Allocation module.
+
+    Sign convention (aligned with loader):
+        demand_total: sum of positive meter values per timestep (consumption, kWh)
+        supply_total: sum of |negative meter values| per timestep (production available, kWh)
+    Both arrays are non-negative float32.
+
+    Attributes:
+        timestamp: Timezone-aware UTC DatetimeIndex.
+        demand_total: Total consumption per timestep (kWh), non-negative.
+        supply_total: Total available production per timestep (kWh), non-negative.
+        n_demanders: Number of meters with net demand (value > 0) per timestep.
+        n_suppliers: Number of meters with net supply (value < 0) per timestep.
+        unit: Unit of values (currently "kWh").
+        freq: Frequency string (e.g. "15min"), or None if unknown.
+        metadata: Optional metadata dict (prosumer/asset IDs, nan policy, etc.).
+    """
+
+    timestamp: pd.DatetimeIndex
+    demand_total: np.ndarray  # float32, non-negative
+    supply_total: np.ndarray  # float32, non-negative
+    n_demanders: np.ndarray   # int32
+    n_suppliers: np.ndarray   # int32
+    unit: str = "kWh"
+    freq: Optional[str] = None
+    metadata: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        n = len(self.timestamp)
+        for arr_name in ("demand_total", "supply_total", "n_demanders", "n_suppliers"):
+            arr = getattr(self, arr_name)
+            if len(arr) != n:
+                raise ValueError(
+                    f"Length mismatch: {arr_name} has {len(arr)} elements but timestamp has {n}"
+                )
+        self.demand_total = ensure_array(self.demand_total, np.float32)
+        self.supply_total = ensure_array(self.supply_total, np.float32)
+        self.n_demanders = ensure_array(self.n_demanders, np.int32)
+        self.n_suppliers = ensure_array(self.n_suppliers, np.int32)
+
 
 @dataclass
 class MeterTimeSeries:
@@ -24,7 +71,7 @@ class MeterTimeSeries:
     Notes:
         - NaN is allowed and treated as "missing data" (not an error).
         - Downstream modules (fill policies, alignment) handle NaN as missing.
-        - If you want to reject NaN, apply a fill policy or alignment with fill_method.
+        - If you want to reject NaN, use missing_data='error' in SimulationConfig.
     """
 
     meter_id: str
@@ -37,11 +84,7 @@ class MeterTimeSeries:
         if self.unit.lower() not in {"kwh"}:
             raise ValueError(f"Unsupported unit: {self.unit}. Only 'kWh' is supported now.")
 
-        # Ensure value is a numpy array of float32
-        if not isinstance(self.value, np.ndarray):
-            self.value = np.asarray(self.value, dtype=np.float32)
-        elif self.value.dtype != np.float32:
-            self.value = self.value.astype(np.float32)
+        self.value = ensure_array(self.value, np.float32)
 
         length = len(self.timestamp)
         if len(self.value) != length:
@@ -94,59 +137,215 @@ class SimulationConfig:
         start: Simulation start timestamp (inclusive). Accepts str or pd.Timestamp.
         end: Simulation end timestamp (inclusive). Accepts str or pd.Timestamp.
         freq: Pandas frequency string (default '15min').
-        allow_partial: If False, DatasetLoader will raise an error when any meter is
-            missing data inside the requested period. If True, loader will log a
-            coverage report but continue.
-        align_to_clock: If True, reindex all series to the canonical simulation clock
-            and apply fill_method to missing values. Only used when allow_partial=True.
-        fill_method: How to fill missing values after alignment. Options: 'zero' (fill with 0),
-            'ffill' (forward-fill), None (no filling, leave NaN). Default 'zero'.
+        missing_data: How to handle missing data during loading (loader stage).
+            Controls both the gate (error vs. continue) and the fill strategy
+            when aligning meters to the simulation clock. Default 'fill_zero'.
+        nan_policy: How the aggregator handles NaN values when computing
+            per-timestep totals (aggregation stage). Default 'treat_as_zero'.
+        tz: Timezone for naive start/end strings (default 'UTC').
+            Dutch meter data is typically CET/CEST — pass 'Europe/Amsterdam' if needed.
+
+    missing_data options (loader stage — structural gaps):
+        'error'        — Raise ValueError if any meter has missing data in the
+                         simulation period. Use this when you need guaranteed
+                         complete data (e.g. billing, regulatory reporting).
+        'fill_zero'    — Align all meters to the simulation clock and fill gaps
+                         with 0.0. Best default for most simulations: missing
+                         meters are treated as having zero consumption/production.
+        'fill_forward' — Align and forward-fill gaps (last known value carries
+                         forward). Useful when meter data has small gaps and the
+                         underlying signal is relatively stable.
+        'keep_nan'     — Align to the simulation clock but leave gaps as NaN.
+                         Downstream modules handle NaN explicitly via nan_policy.
+                         Use when you want full control over how missing data
+                         propagates through the pipeline.
+
+    nan_policy options (aggregation stage — NaN in values):
+        'treat_as_zero' — NaN meter values contribute 0 to demand/supply totals.
+                          The meter is effectively absent for that timestep.
+        'propagate'      — Any NaN meter at a timestep makes that timestep's
+                          total NaN. Useful for detecting incomplete data in
+                          aggregated results.
+
+    Date format:
+        Dates are parsed with dayfirst=True (Dutch convention: DD-MM-YYYY).
+        "02-03-2025" is interpreted as 2 March 2025, not February 3rd.
+        ISO format ("2025-03-02") and pd.Timestamp objects also work.
+
+    Examples:
+        # Strict: fail if any data is missing
+        SimulationConfig(start="01-01-2025", end="07-01-2025", missing_data="error")
+
+        # Default: fill gaps with zero, NaN treated as zero in aggregation
+        SimulationConfig(start="01-01-2025", end="07-01-2025")
+
+        # Keep NaN through loading, let aggregator propagate them
+        SimulationConfig(
+            start="01-01-2025", end="07-01-2025",
+            missing_data="keep_nan", nan_policy="propagate",
+        )
     """
+
+    VALID_MISSING_DATA = ("error", "fill_zero", "fill_forward", "keep_nan")
+    VALID_NAN_POLICY = ("treat_as_zero", "propagate")
 
     start: pd.Timestamp | str
     end: pd.Timestamp | str
     freq: str = "15min"
-    allow_partial: bool = False
-    align_to_clock: bool = False
-    fill_method: Optional[str] = "zero"  # 'zero', 'ffill', or None
+    missing_data: str = "fill_zero"
+    nan_policy: str = "treat_as_zero"
+    tz: str = "UTC"
 
-    def to_index(self, tz: str = "UTC") -> pd.DatetimeIndex:
+    def __post_init__(self):
+        if self.missing_data not in self.VALID_MISSING_DATA:
+            raise ValueError(
+                f"Invalid missing_data={self.missing_data!r}. "
+                f"Must be one of: {', '.join(self.VALID_MISSING_DATA)}"
+            )
+        if self.nan_policy not in self.VALID_NAN_POLICY:
+            raise ValueError(
+                f"Invalid nan_policy={self.nan_policy!r}. "
+                f"Must be one of: {', '.join(self.VALID_NAN_POLICY)}"
+            )
+
+    def to_index(self) -> pd.DatetimeIndex:
         """Return a timezone-aware DatetimeIndex for the configured period.
 
-        The index will be created with closed='right' semantics consistent with
-        P4 interval-end timestamps if callers require that convention. The
-        caller is responsible for interpreting interval semantics.
+        Naive start/end timestamps are localized to self.tz (default "UTC").
+        Timezone-aware timestamps are used as-is. Dutch meter data is typically
+        in CET/CEST — pass tz="Europe/Amsterdam" to SimulationConfig if needed.
+
+        Date strings are parsed with dayfirst=True (Dutch DD-MM-YYYY convention).
         """
-        start_ts = pd.to_datetime(self.start)
-        end_ts = pd.to_datetime(self.end)
+        start_ts = pd.to_datetime(self.start, dayfirst=True)
+        end_ts = pd.to_datetime(self.end, dayfirst=True)
         if start_ts.tz is None:
-            start_ts = start_ts.tz_localize(tz)
+            start_ts = start_ts.tz_localize(self.tz)
         if end_ts.tz is None:
-            end_ts = end_ts.tz_localize(tz)
+            end_ts = end_ts.tz_localize(self.tz)
         return pd.date_range(start=start_ts, end=end_ts, freq=self.freq)
 
 
 @dataclass
-class CoverageReport:
-    """Report describing coverage of meters against a SimulationConfig.
+class AllocationResult:
+    """Per-timestep allocation of local supply to each prosumer.
+
+    Output of the Allocation module; direct input contract for the Pricing module.
+
+    Sign convention: all arrays are non-negative kWh values.
+
+    Constraints (enforced by allocation strategies, not by __post_init__):
+        - allocations[meter_id][t] <= demand[meter_id][t]   (no over-allocation)
+        - sum(allocations[:,t]) <= supply_total[t]          (no excess)
+        - grid_import[t] >= 0, grid_export[t] >= 0
+
+    NaN convention: NaN demand is treated as 0 (prosumer absent).
+    NaN supply is treated as 0 (no local generation that timestep).
 
     Attributes:
-        missing_prosumers: list of prosumer meter_ids missing any timestamps in the requested period
-        missing_production_assets: list of asset meter_ids missing any timestamps in the requested period
-        per_meter_full_span: dict mapping meter_id -> pd.Timedelta of the longest contiguous fully-covered span
-        overall_longest_full_span: pd.Timedelta, maximum across all meters
-        per_meter_missing_count: dict mapping meter_id -> count of missing timesteps in period
-        per_meter_missing_fraction: dict mapping meter_id -> fraction [0,1] of missing timesteps
-        per_meter_first_missing: dict mapping meter_id -> first timestamp with missing value (or None)
-        per_meter_last_missing: dict mapping meter_id -> last timestamp with missing value (or None)
+        timestamp: Timezone-aware UTC DatetimeIndex.
+        prosumer_ids: Ordered list of prosumer meter IDs.
+        allocations: Per-prosumer allocated kWh —
+            dict mapping meter_id → float32 array of shape (n_timesteps,).
+        grid_import: Community-level unmet demand per timestep (kWh), non-negative.
+            Equal to: demand_total − sum(allocations).
+        grid_export: Community-level unallocated local supply per timestep (kWh), non-negative.
+            Equal to: supply_total − sum(allocations).
+        strategy: Name of the allocation strategy (e.g. "equal_allocation").
+        unit: Unit of values (currently "kWh").
+        freq: Frequency string (e.g. "15min"), or None if unknown.
+        metadata: Optional metadata dict (strategy params, counts, etc.).
     """
 
-    missing_prosumers: list[str] = field(default_factory=list)
-    missing_production_assets: list[str] = field(default_factory=list)
-    per_meter_full_span: dict[str, pd.Timedelta] = field(default_factory=dict)
-    overall_longest_full_span: pd.Timedelta = pd.Timedelta(0)
-    per_meter_missing_count: dict[str, int] = field(default_factory=dict)
-    per_meter_missing_fraction: dict[str, float] = field(default_factory=dict)
-    per_meter_first_missing: dict[str, Optional[pd.Timestamp]] = field(default_factory=dict)
-    per_meter_last_missing: dict[str, Optional[pd.Timestamp]] = field(default_factory=dict)
+    timestamp: pd.DatetimeIndex
+    prosumer_ids: list[str]
+    allocations: dict[str, np.ndarray]   # meter_id → float32 (n_timesteps,)
+    grid_import: np.ndarray              # float32 (n_timesteps,), non-negative
+    grid_export: np.ndarray              # float32 (n_timesteps,), non-negative
+    strategy: str
+    unit: str = "kWh"
+    freq: Optional[str] = None
+    metadata: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        n = len(self.timestamp)
+        coerced: dict[str, np.ndarray] = {}
+        for meter_id, arr in self.allocations.items():
+            arr = ensure_array(arr, np.float32)
+            if len(arr) != n:
+                raise ValueError(
+                    f"Allocation array for {meter_id!r} has length {len(arr)}, expected {n}"
+                )
+            coerced[meter_id] = arr
+        self.allocations = coerced
+        for arr_name in ("grid_import", "grid_export"):
+            arr = ensure_array(getattr(self, arr_name), np.float32)
+            if len(arr) != n:
+                raise ValueError(f"{arr_name} has length {len(arr)}, expected {n}")
+            setattr(self, arr_name, arr)
+
+
+@dataclass
+class PricingResult:
+    """Per-timestep local energy charges for each prosumer.
+
+    Output of the Pricing module. Covers local allocated energy only —
+    grid import/export pricing is an explicit non-goal for Phase 1.
+
+    Sign convention: all arrays are non-negative EUR values.
+
+    Pricing invariants (enforced by pricing strategies):
+        - local_cost_eur[meter_id][t] == allocations[meter_id][t] * fixed_price
+        - total_local_cost_eur[t] == sum(local_cost_eur[:,t])
+        - Sign of costs follows sign of fixed_price (negative price = subsidy/rebate).
+
+    NaN convention: NaN allocations are treated as 0 (prosumer absent that timestep).
+
+    Attributes:
+        timestamp: Timezone-aware UTC DatetimeIndex.
+        prosumer_ids: Ordered list of prosumer meter IDs (preserved from AllocationResult).
+        local_cost_eur: Per-prosumer local energy charges —
+            dict mapping meter_id → float32 array of shape (n_timesteps,).
+        local_kwh_priced: Per-prosumer kWh that were priced (= allocations, NaN→0) —
+            dict mapping meter_id → float32 array of shape (n_timesteps,).
+        total_local_cost_eur: Community total local energy charges per timestep (EUR).
+        total_local_cost_eur_by_prosumer: Total charges per prosumer over all timesteps —
+            dict mapping meter_id → float.
+        fixed_price_eur_per_kwh: The fixed local price applied (EUR/kWh).
+        strategy: Name of the pricing strategy (e.g. "fixed_price").
+        unit: Unit of monetary values (currently "EUR").
+        freq: Frequency string (e.g. "15min"), or None if unknown.
+        metadata: Optional metadata dict.
+    """
+
+    timestamp: pd.DatetimeIndex
+    prosumer_ids: list[str]
+    local_cost_eur: dict[str, np.ndarray]        # meter_id → float32 (n_timesteps,)
+    local_kwh_priced: dict[str, np.ndarray]      # meter_id → float32 (n_timesteps,)
+    total_local_cost_eur: np.ndarray             # float32 (n_timesteps,), non-negative
+    total_local_cost_eur_by_prosumer: dict[str, float]
+    fixed_price_eur_per_kwh: float
+    strategy: str
+    unit: str = "EUR"
+    freq: str | None = None
+    metadata: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        n = len(self.timestamp)
+        for field_name in ("local_cost_eur", "local_kwh_priced"):
+            raw = getattr(self, field_name)
+            coerced: dict[str, np.ndarray] = {}
+            for meter_id, arr in raw.items():
+                arr = ensure_array(arr, np.float32)
+                if len(arr) != n:
+                    raise ValueError(
+                        f"{field_name}[{meter_id!r}] has length {len(arr)}, expected {n}"
+                    )
+                coerced[meter_id] = arr
+            setattr(self, field_name, coerced)
+        self.total_local_cost_eur = ensure_array(self.total_local_cost_eur, np.float32)
+        if len(self.total_local_cost_eur) != n:
+            raise ValueError(
+                f"total_local_cost_eur has length {len(self.total_local_cost_eur)}, expected {n}"
+            )
 

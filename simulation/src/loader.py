@@ -5,27 +5,20 @@ This module handles:
 2. Schema validation (timestamps, columns, data types)
 3. Timezone handling
 4. Missing value handling policies
+5. Value sign convention: positive values represent consumption, negative values represent production
 """
 
 import logging
-from enum import Enum
 from pathlib import Path
-from typing import Optional, Union, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
-from .core_types import LoadedDataset, MeterTimeSeries, SimulationConfig, CoverageReport
+from .core_types import LoadedDataset, MeterTimeSeries, SimulationConfig
+from .report_types import CoverageReport
 
 logger = logging.getLogger(__name__)
-
-
-class MissingValuePolicy(str, Enum):
-    """Policy for handling missing timestamps in the time series."""
-
-    ERROR = "error"  # Raise an error on missing timestamps
-    FILL_FORWARD = "fill_forward"  # Forward-fill missing values
-    FILL_ZERO = "fill_zero"  # Fill missing values with zero
 
 
 class SchemaValidator:
@@ -72,25 +65,26 @@ class TimestampValidator:
     def validate_timestamps(
         cls,
         timestamps: pd.DatetimeIndex,
-        policy: MissingValuePolicy = MissingValuePolicy.ERROR,
         series_id: Optional[str] = None,
         freq: Optional[str] = None,
     ) -> Tuple[pd.DatetimeIndex, Optional[str]]:
-        """Validate and potentially fix timestamps.
+        """Validate timestamps: check for duplicates, ensure timezone, infer frequency.
+
+        This is a raw validation step — it warns on gaps but never errors on them.
+        Missing-data policy decisions are made later by DatasetLoader using
+        SimulationConfig.missing_data.
 
         Args:
             timestamps: The timestamp index to validate.
-            policy: How to handle missing timestamps.
             series_id: Identifier of the series (for logging).
             freq: Expected frequency (e.g., "15min"). If None, will infer from data.
 
         Returns:
             Tuple of (validated_timestamps, inferred_or_provided_freq).
-            If freq was provided, inferred freq will match. If freq was None,
-            returns the inferred frequency string.
 
         Raises:
-            ValueError: If timestamps are invalid and policy is ERROR.
+            ValueError: If timestamps are empty, contain duplicates, or frequency
+                cannot be inferred.
         """
         if len(timestamps) == 0:
             raise ValueError("Timestamp index is empty")
@@ -114,20 +108,13 @@ class TimestampValidator:
             inferred_freq = cls._infer_frequency(timestamps, series_id)
             logger.info(f"Inferred frequency {inferred_freq} from timestamps")
 
-        # Check for gaps
+        # Check for gaps (warn only — policy decisions happen in DatasetLoader)
         gaps = cls._find_gaps(timestamps, freq=inferred_freq)
-
         if gaps:
             gap_msg = f"Found {len(gaps)} gaps in timestamps"
             if series_id:
                 gap_msg += f" in {series_id}"
-
-            if policy == MissingValuePolicy.ERROR:
-                raise ValueError(gap_msg)
-            elif policy == MissingValuePolicy.FILL_FORWARD:
-                logger.warning(f"{gap_msg}; filling with forward fill")
-            elif policy == MissingValuePolicy.FILL_ZERO:
-                logger.warning(f"{gap_msg}; filling with zero")
+            logger.warning(gap_msg)
 
         return timestamps, inferred_freq
 
@@ -232,18 +219,14 @@ class TimestampValidator:
         return gaps
 
 class MeterLoader:
-    """Loader for time series data for meter id's."""
+    """Loader for time series data for meter id's.
 
-    def __init__(
-        self,
-        missing_value_policy: MissingValuePolicy = MissingValuePolicy.ERROR,
-    ):
-        """Initialize loader.
+    Loads raw meter data from Parquet files. Validates schema and timestamps
+    but does not enforce missing-data policies — that is handled by
+    DatasetLoader using SimulationConfig.missing_data.
+    """
 
-        Args:
-            missing_value_policy: How to handle missing timestamps.
-        """
-        self.policy = missing_value_policy
+    def __init__(self):
         self.validator = SchemaValidator()
         self.ts_validator = TimestampValidator()
 
@@ -283,6 +266,7 @@ class MeterLoader:
         Expected format: tidy structure with columns {timestamp, meter_id, value}.
         Multiple meter ids can be in the same file (grouped by meter_id).
 
+
         Returns raw series with native timestamps (one meter may have different
         timestamp coverage than another). No canonical reindexing here.
 
@@ -310,7 +294,7 @@ class MeterLoader:
             # Validate timestamps and infer freq if needed
             timestamps = pd.DatetimeIndex(group["timestamp"])
             timestamps, inferred_freq_for_meter = self.ts_validator.validate_timestamps(
-                timestamps, self.policy, f"meter {meter_id}", freq=freq or inferred_freq
+                timestamps, series_id=f"meter {meter_id}", freq=freq or inferred_freq
             )
 
             # Store inferred frequency for this meter
@@ -380,27 +364,22 @@ class MeterLoader:
 
 
 class DatasetLoader:
-    """High-level loader orchestrating prosumer and production asset loading."""
+    """High-level loader orchestrating prosumer and production asset loading.
 
-    def __init__(
-        self,
-        missing_value_policy: MissingValuePolicy = MissingValuePolicy.ERROR,
-    ):
-        """Initialize loader.
+    Missing-data behavior is controlled by SimulationConfig.missing_data,
+    not by a separate policy on the loader. See SimulationConfig for options.
+    """
 
-        Args:
-            missing_value_policy: How to handle missing timestamps.
-        """
-        self.prosumer_loader = MeterLoader(missing_value_policy)
-        self.asset_loader = MeterLoader(missing_value_policy)
+    def __init__(self):
+        self.prosumer_loader = MeterLoader()
+        self.asset_loader = MeterLoader()
 
     def load(
         self,
         prosumer_data_path: Optional[Path] = None,
         production_data_path: Optional[Path] = None,
         simulation_config: Optional["SimulationConfig"] = None,
-        return_coverage_report: bool = False,
-    ) -> Union[LoadedDataset, Tuple[LoadedDataset, CoverageReport]]:
+    ) -> Tuple[LoadedDataset, Optional[CoverageReport]]:
         """Load a complete dataset.
 
         MeterLoader automatically detects if paths are files or folders.
@@ -410,10 +389,10 @@ class DatasetLoader:
             prosumer_data_path: Path to prosumer data (file or folder).
             production_data_path: Path to production data (file or folder).
             simulation_config: Optional SimulationConfig with freq and other settings.
-            return_coverage_report: If True, also return CoverageReport.
 
         Returns:
-            LoadedDataset with validated data, and optionally CoverageReport.
+            Tuple of (LoadedDataset, CoverageReport or None).
+            CoverageReport is None if no simulation_config provided.
 
         Raises:
             ValueError: If no data paths provided, or if frequency validation fails.
@@ -435,16 +414,21 @@ class DatasetLoader:
 
         if production_data_path:
             production_assets, asset_metadata = self.asset_loader.load(production_data_path, unit="kWh", freq=freq)
+            # Negate production values to make them negative (uniform convention: positive=consumption, negative=production)
+            for asset in production_assets:
+                asset.value = -asset.value
             all_metadata["inferred_frequencies"].update(asset_metadata.get("inferred_frequencies", {}))
             all_metadata["data_sources"]["production_assets"] = asset_metadata
 
         # Validate frequency consistency across all meters
         self._validate_frequency_consistency(all_metadata["inferred_frequencies"], freq)
 
-        # If simulation_config provided, enforce coverage checks and optionally return a CoverageReport
+        # If simulation_config provided, compute coverage and apply missing_data policy
         coverage_report = None
         if simulation_config is not None:
-            expected_index = simulation_config.to_index(tz="UTC")
+            expected_index = simulation_config.to_index()
+
+            # --- Coverage analysis ---
             missing_prosumers = []
             missing_production_assets = []
             per_meter_full_span = {}
@@ -454,25 +438,16 @@ class DatasetLoader:
             per_meter_last_missing = {}
 
             def check_coverage_per_series(series_list, missing_list):
-                """Check coverage: timestamp exists AND value is not NaN.
-
-                Correctly checks: for each timestep in expected_index, does the meter have
-                a non-NaN value? Computes detailed metrics for reporting.
-                """
+                """Check coverage: timestamp exists AND value is not NaN."""
                 longest_span = pd.Timedelta(0)
                 for s in series_list:
                     ts = pd.DatetimeIndex(s.timestamp)
-                    # Reindex the VALUES (not just check timestamp presence)
-                    # For each expected timestamp, get the meter's value
                     values = pd.Series(s.value, index=ts).reindex(expected_index)
-                    # Coverage = has non-NaN value
                     present = values.notna().to_numpy()
 
-                    # Count and fraction of missing
                     missing_count = (~present).sum()
                     missing_fraction = missing_count / len(present) if len(present) > 0 else 0.0
 
-                    # First and last missing timestamp
                     missing_indices = np.where(~present)[0]
                     first_missing = expected_index[missing_indices[0]] if len(missing_indices) > 0 else None
                     last_missing = expected_index[missing_indices[-1]] if len(missing_indices) > 0 else None
@@ -485,7 +460,6 @@ class DatasetLoader:
                     if not present.all():
                         missing_list.append(s.meter_id)
 
-                    # Compute longest contiguous True run in present
                     if present.any():
                         arr = present.astype(int)
                         padded = np.concatenate([[0], arr, [0]])
@@ -493,11 +467,7 @@ class DatasetLoader:
                         starts = np.where(diff == 1)[0]
                         ends = np.where(diff == -1)[0]
                         counts = (ends - starts)
-                        if len(counts) > 0:
-                            lengths = counts * pd.Timedelta(simulation_config.freq)
-                            max_len = lengths.max()
-                        else:
-                            max_len = pd.Timedelta(0)
+                        max_len = (counts * pd.Timedelta(simulation_config.freq)).max() if len(counts) > 0 else pd.Timedelta(0)
                     else:
                         max_len = pd.Timedelta(0)
 
@@ -521,68 +491,57 @@ class DatasetLoader:
                 per_meter_last_missing=per_meter_last_missing,
             )
 
-            if (missing_prosumers or missing_production_assets) and not simulation_config.allow_partial:
+            # --- Gate: error mode raises on any missing data ---
+            has_missing = missing_prosumers or missing_production_assets
+            if has_missing and simulation_config.missing_data == "error":
                 logger.warning(
                     "Missing data detected for the requested simulation period. "
                     f"Missing prosumers: {missing_prosumers}; Missing assets: {missing_production_assets}"
                 )
                 logger.info(
-                    f"Longest full-coverage contiguous subperiod within requested period: {overall_longest}"
+                    f"Longest full-coverage contiguous subperiod: {overall_longest}"
                 )
                 raise ValueError(
                     "Simulation period contains missing data for one or more meters. "
-                    "Set SimulationConfig.allow_partial=True to override and continue."
+                    "Set missing_data='fill_zero' (or 'fill_forward'/'keep_nan') to continue."
                 )
 
-        dataset = LoadedDataset(
-            prosumers=prosumers,
-            production_assets=production_assets,
-            timestamp_index=simulation_config.to_index(tz="UTC") if simulation_config else None,
-            timezone="UTC",
-            metadata=all_metadata,
-        )
+            # --- Align all series to the simulation clock and fill ---
+            missing_data = simulation_config.missing_data
 
-        # If align_to_clock=True, reindex all series to the simulation clock
-        if simulation_config is not None and simulation_config.align_to_clock:
-            expected_index = simulation_config.to_index(tz="UTC")
-
-            def align_and_fill(series_list, fill_method):
-                """Reindex series to canonical clock and apply fill method."""
+            def align_and_fill(series_list):
+                """Reindex series to canonical clock and apply fill strategy."""
                 aligned = []
                 for s in series_list:
-                    # Create a DataFrame with the original data
                     df = pd.DataFrame({"value": s.value}, index=s.timestamp)
-                    # Reindex to canonical clock
                     df_reindexed = df.reindex(expected_index)
-                    # Apply fill method
-                    if fill_method == "zero":
+
+                    if missing_data == "fill_zero":
                         df_reindexed["value"] = df_reindexed["value"].fillna(0.0)
-                    elif fill_method == "ffill":
+                    elif missing_data == "fill_forward":
                         df_reindexed["value"] = df_reindexed["value"].ffill()
-                    # else: fill_method is None, leave as NaN
-                    # Create new MeterTimeSeries with aligned data
-                    aligned_series = MeterTimeSeries(
+                    # "keep_nan" and "error" (no missing data): leave as-is
+
+                    aligned.append(MeterTimeSeries(
                         meter_id=s.meter_id,
                         timestamp=expected_index,
                         value=df_reindexed["value"].to_numpy(dtype="float32"),
                         unit=s.unit,
-                    )
-                    aligned.append(aligned_series)
+                    ))
                 return aligned
 
-            prosumers = align_and_fill(prosumers, simulation_config.fill_method)
-            production_assets = align_and_fill(production_assets, simulation_config.fill_method)
-            dataset = LoadedDataset(
-                prosumers=prosumers,
-                production_assets=production_assets,
-                timestamp_index=expected_index,
-                timezone="UTC",
-                metadata=all_metadata,
-            )
+            prosumers = align_and_fill(prosumers)
+            production_assets = align_and_fill(production_assets)
 
-        if return_coverage_report:
-            return dataset, coverage_report
-        return dataset
+        dataset = LoadedDataset(
+            prosumers=prosumers,
+            production_assets=production_assets,
+            timestamp_index=simulation_config.to_index() if simulation_config else None,
+            timezone=simulation_config.tz if simulation_config else None,
+            metadata=all_metadata,
+        )
+
+        return dataset, coverage_report
 
     @staticmethod
     def _validate_frequency_consistency(inferred_frequencies: dict, provided_freq: Optional[str]) -> None:
@@ -634,4 +593,3 @@ class DatasetLoader:
         else:
             # Frequency was inferred; log the result
             logger.info(f"Frequency validation passed: all meters have consistent inferred freq '{inferred_freq}'")
-
