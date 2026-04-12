@@ -14,6 +14,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import os
+
+os.environ.setdefault("BOKEH_RESOURCES", "server")
+
 import panel as pn
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
