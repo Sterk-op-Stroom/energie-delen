@@ -122,9 +122,9 @@ def available_profiles(step: AggregatedStep) -> list[str]:
     profiles = []
     if ts.normalize().nunique() >= 2:
         profiles.append("Daily")
-    if ts.to_period("W").nunique() >= 2:
+    if ts.tz_localize(None).to_period("W").nunique() >= 2:
         profiles.append("Weekly")
-    if ts.to_period("Y").nunique() >= 2:
+    if ts.tz_localize(None).to_period("Y").nunique() >= 2:
         profiles.append("Yearly")
     return profiles
 

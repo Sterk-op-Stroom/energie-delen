@@ -18,6 +18,7 @@ import os
 
 os.environ.setdefault("BOKEH_RESOURCES", "server")
 
+import threading
 import panel as pn
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -33,6 +34,25 @@ pn.extension(
     sizing_mode="stretch_width",
     notifications=True,
 )
+
+def _on_session_destroyed(session_context, _pn=pn, _os=os, _threading=threading) -> None:
+    existing = _pn.state.cache.get("_shutdown_timer")
+    if existing is not None:
+        existing.cancel()
+
+    def _check_and_exit() -> None:
+        if _pn.state.session_info.get("live", 0) == 0:
+            _os._exit(0)
+
+    timer = _threading.Timer(3.0, _check_and_exit)
+    timer.daemon = True
+    timer.start()
+    _pn.state.cache["_shutdown_timer"] = timer
+
+
+if not pn.state.cache.get("_shutdown_registered"):
+    pn.state.cache["_shutdown_registered"] = True
+    pn.state.on_session_destroyed(_on_session_destroyed)
 
 
 def create_app() -> pn.Template:
