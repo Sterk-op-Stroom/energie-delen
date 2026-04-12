@@ -17,7 +17,7 @@ The core philosophy is modularity and reuse: communities should be able to adapt
 This repository uses **multiple licenses**, which can be found in the `LICENSES` directory:
 
 - **Software (simulation code)**: GNU Affero General Public License v3.0 or later (AGPL-3.0-or-later).  
-  Applies to all source code under `simulation/src/` and other code unless stated otherwise.
+  Applies to all source code under `simulation/` and other code unless stated otherwise.
 
 - **Documentation, business models, and contract templates**: Creative Commons Attribution 4.0 International (CC BY 4.0).  
   Applies to the contents of `simulation/docs/`, `business-models/`, and `contracts/` unless stated otherwise.
