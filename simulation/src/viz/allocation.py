@@ -58,23 +58,75 @@ def plot_energy_flow(allocation: AllocationResult, step: AggregatedStep) -> Figu
 
 
 def plot_self_sufficiency(allocation: AllocationResult, step: AggregatedStep) -> Figure:
-    """Self-sufficiency rate: fraction of demand met locally over time."""
+    """Self-sufficiency and self-consumption rates over time (combined view).
+
+    Self-sufficiency  = allocated / demand  (how much demand is met locally)
+    Self-consumption  = allocated / supply  (how much local supply is used locally)
+    """
+    apply_style()
+    fig, axes = plt.subplots(2, 1, figsize=(14, 7), sharex=True)
+
+    total_alloc = sum(allocation.allocations[m] for m in allocation.prosumer_ids)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        _ss_raw = np.where(step.demand_total > 0, total_alloc / step.demand_total, np.float32(0.0))
+        _sc_raw = np.where(step.supply_total > 0, total_alloc / step.supply_total, np.float32(0.0))
+
+    # --- Top: self-sufficiency ---
+    ax = axes[0]
+    ss_rate = _ss_raw
+    ax.fill_between(allocation.timestamp, ss_rate, alpha=0.3, color=LOCAL_ALLOC_COLOR)
+    ax.plot(allocation.timestamp, ss_rate, color=LOCAL_ALLOC_COLOR, linewidth=0.8,
+            label="Self-sufficiency")
+    ax.axhline(1.0, color="gray", linestyle="--", linewidth=0.5)
+    avg_ss = float(total_alloc.sum() / step.demand_total.sum()) if step.demand_total.sum() > 0 else 0
+    ax.axhline(avg_ss, color=LOCAL_ALLOC_COLOR, linestyle=":", linewidth=1,
+               label=f"Period avg: {avg_ss:.1%}")
+    ax.set_ylabel("Rate")
+    ax.set_ylim(0, min(1.05, ss_rate.max() * 1.1) if ss_rate.max() > 0 else 1.05)
+    ax.set_title("Self-Sufficiency Rate  (local allocation ÷ demand)")
+    ax.legend(loc="upper right")
+
+    # --- Bottom: self-consumption ---
+    ax = axes[1]
+    sc_rate = _sc_raw
+    ax.fill_between(allocation.timestamp, sc_rate, alpha=0.3, color=SUPPLY_COLOR)
+    ax.plot(allocation.timestamp, sc_rate, color=SUPPLY_COLOR, linewidth=0.8,
+            label="Self-consumption")
+    ax.axhline(1.0, color="gray", linestyle="--", linewidth=0.5)
+    avg_sc = float(total_alloc.sum() / step.supply_total.sum()) if step.supply_total.sum() > 0 else 0
+    ax.axhline(avg_sc, color=SUPPLY_COLOR, linestyle=":", linewidth=1,
+               label=f"Period avg: {avg_sc:.1%}")
+    ax.set_ylabel("Rate")
+    ax.set_ylim(0, min(1.05, sc_rate.max() * 1.1) if sc_rate.max() > 0 else 1.05)
+    ax.set_title("Self-Consumption Rate  (local allocation ÷ supply)")
+    ax.legend(loc="upper right")
+
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    return fig
+
+
+def plot_self_consumption(allocation: AllocationResult, step: AggregatedStep) -> Figure:
+    """Self-consumption rate: fraction of local supply consumed within the community."""
     apply_style()
     fig, ax = plt.subplots(figsize=(14, 4))
 
     total_alloc = sum(allocation.allocations[m] for m in allocation.prosumer_ids)
-    rate = np.where(step.demand_total > 0, total_alloc / step.demand_total, 0.0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rate = np.where(step.supply_total > 0, total_alloc / step.supply_total, np.float32(0.0))
 
-    ax.fill_between(allocation.timestamp, rate, alpha=0.3, color=LOCAL_ALLOC_COLOR)
-    ax.plot(allocation.timestamp, rate, color=LOCAL_ALLOC_COLOR, linewidth=0.8)
+    ax.fill_between(allocation.timestamp, rate, alpha=0.3, color=SUPPLY_COLOR)
+    ax.plot(allocation.timestamp, rate, color=SUPPLY_COLOR, linewidth=0.8)
     ax.axhline(1.0, color="gray", linestyle="--", linewidth=0.5)
 
-    avg_rate = float(total_alloc.sum() / step.demand_total.sum()) if step.demand_total.sum() > 0 else 0
-    ax.axhline(avg_rate, color=LOCAL_ALLOC_COLOR, linestyle=":", linewidth=1, label=f"Period avg: {avg_rate:.1%}")
+    avg_rate = float(total_alloc.sum() / step.supply_total.sum()) if step.supply_total.sum() > 0 else 0
+    ax.axhline(avg_rate, color=SUPPLY_COLOR, linestyle=":", linewidth=1,
+               label=f"Period avg: {avg_rate:.1%}")
 
-    ax.set_ylabel("Self-sufficiency rate")
+    ax.set_ylabel("Self-consumption rate")
     ax.set_ylim(0, min(1.05, rate.max() * 1.1) if rate.max() > 0 else 1.05)
-    ax.set_title("Local Self-Sufficiency Rate")
+    ax.set_title("Local Self-Consumption Rate")
     ax.legend(loc="upper right")
     fig.autofmt_xdate()
     fig.tight_layout()

@@ -56,28 +56,17 @@ class InspectResult:
     """Result of inspect_dataset(), usable from scripts and notebooks.
 
     Attributes:
-        meters: List of MeterInfo summaries.
-        global_start: Earliest timestamp across all meters.
-        global_end: Latest timestamp across all meters.
-        common_start: Latest start across all meters (overlap begin).
-        common_end: Earliest end across all meters (overlap end).
-        has_overlap: Whether common_start <= common_end.
-        overlap_days: Duration of common overlap in days (0 if no overlap).
+        meters: Per-meter summaries (start, end, n_points, nan_fraction, freq).
         frequencies: Dict mapping meter_id -> inferred freq string.
         freq_consistent: Whether all meters share the same frequency.
-        suggested_start: Suggested --start for cli run (date string).
-        suggested_end: Suggested --end for cli run (date string).
+        suggested_start: Suggested --start for cli run (dd-mm-yyyy string, or
+            None if no complete overlap exists).
+        suggested_end: Suggested --end for cli run (dd-mm-yyyy string).
         suggested_freq: Suggested --freq for cli run.
         raw_meters: The raw MeterTimeSeries objects (for coverage plots).
     """
 
     meters: list[MeterInfo]
-    global_start: pd.Timestamp
-    global_end: pd.Timestamp
-    common_start: pd.Timestamp
-    common_end: pd.Timestamp
-    has_overlap: bool
-    overlap_days: float
     frequencies: dict[str, str | None]
     freq_consistent: bool
     suggested_start: str | None

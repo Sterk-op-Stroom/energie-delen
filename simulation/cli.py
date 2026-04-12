@@ -32,6 +32,16 @@ class PipelineResult(NamedTuple):
     pricing: PricingResult
     config: SimulationConfig
 
+    def __str__(self) -> str:
+        lines = [
+            self.config.summary(),
+            self.dataset.summary(),
+            self.step.summary(),
+            self.allocation.summary(),
+            self.pricing.summary(),
+        ]
+        return "\n".join(lines)
+
 
 def setup_logging(verbose: bool = False) -> None:
     """Configure logging."""
@@ -220,6 +230,66 @@ def save_report(pipeline: PipelineResult, output_path: Path) -> None:
         print(f"\nReport saved: {output_path}/ ({len(figures)} images)")
 
 
+def _find_longest_complete_period(
+    raw_meters: list[MeterTimeSeries],
+    freq: str,
+    common_start: pd.Timestamp,
+    common_end: pd.Timestamp,
+) -> tuple[pd.Timestamp | None, pd.Timestamp | None]:
+    """Return the day-aligned start/end of the longest contiguous period where
+    all meters have non-NaN data at every timestep.
+
+    Uses a shared DatetimeIndex and vectorised numpy AND — O(n_meters × n_steps),
+    no Python-level loops over timestamps.
+    """
+    if not raw_meters:
+        return None, None
+
+    idx = pd.date_range(start=common_start, end=common_end, freq=freq)
+    if len(idx) == 0:
+        return None, None
+
+    # Build one boolean valid-mask per meter on the shared index, then AND them.
+    all_valid = np.ones(len(idx), dtype=bool)
+    for m in raw_meters:
+        s = pd.Series(m.value.astype(float), index=m.timestamp)
+        reindexed = s.reindex(idx)
+        all_valid &= ~np.isnan(reindexed.values)
+
+    if not all_valid.any():
+        return None, None
+
+    # Find the longest contiguous True run with numpy diff.
+    padded = np.empty(len(all_valid) + 2, dtype=bool)
+    padded[0] = False
+    padded[1:-1] = all_valid
+    padded[-1] = False
+    diffs = np.diff(padded.view(np.int8))
+    run_starts = np.where(diffs == 1)[0]
+    run_ends = np.where(diffs == -1)[0]  # exclusive
+    lengths = run_ends - run_starts
+    best = int(np.argmax(lengths))
+
+    best_start = idx[run_starts[best]]
+    best_end = idx[run_ends[best] - 1]
+
+    # Align to day boundaries, keeping only fully-covered days.
+    step = pd.Timedelta(freq)
+    # day_start: ceil to midnight so partial first days are excluded.
+    day_start = best_start.normalize()
+    if best_start != day_start:
+        day_start += pd.Timedelta(days=1)
+    # day_end: only include a day if its last expected timestep is covered.
+    day_end = best_end.normalize()
+    last_ts_of_day = day_end + pd.Timedelta(days=1) - step
+    if best_end < last_ts_of_day:
+        day_end -= pd.Timedelta(days=1)
+
+    if day_start > day_end:
+        return None, None
+    return day_start, day_end
+
+
 def inspect_dataset(
     prosumer_path: Path | None = None,
     production_path: Path | None = None,
@@ -291,20 +361,21 @@ def inspect_dataset(
     suggested_freq = next(iter(unique_freqs)) if unique_freqs else "15min"
 
     if has_overlap:
-        suggested_start = common_start.normalize().strftime("%d-%m-%Y")
-        suggested_end = common_end.normalize().strftime("%d-%m-%Y")
+        complete_start, complete_end = _find_longest_complete_period(
+            raw_meters, suggested_freq, common_start, common_end
+        )
+        if complete_start is not None and complete_end is not None:
+            suggested_start = complete_start.strftime("%d-%m-%Y")
+            suggested_end = complete_end.strftime("%d-%m-%Y")
+        else:
+            suggested_start = common_start.normalize().strftime("%d-%m-%Y")
+            suggested_end = common_end.normalize().strftime("%d-%m-%Y")
     else:
         suggested_start = None
         suggested_end = None
 
     result = InspectResult(
         meters=sorted(meter_infos, key=lambda m: m.meter_id),
-        global_start=global_start,
-        global_end=global_end,
-        common_start=common_start,
-        common_end=common_end,
-        has_overlap=has_overlap,
-        overlap_days=overlap_days,
         frequencies=frequencies,
         freq_consistent=freq_consistent,
         suggested_start=suggested_start,
@@ -327,15 +398,13 @@ def save_coverage_report(info: InspectResult, output_path: Path) -> None:
 
     from src.viz.coverage import plot_coverage_heatmap, plot_coverage_timeline, plot_missing_fraction_bars
 
-    # Build expected index from common overlap (or global range)
-    if info.has_overlap:
-        expected_index = pd.date_range(
-            start=info.common_start, end=info.common_end, freq=info.suggested_freq,
-        )
-    else:
-        expected_index = pd.date_range(
-            start=info.global_start, end=info.global_end, freq="15min",
-        )
+    # Build expected index over the full global extent so all data is visible.
+    expected_index = pd.date_range(
+        start=min(m.start for m in info.meters),
+        end=max(m.end for m in info.meters),
+        freq=info.suggested_freq,
+        tz="UTC",
+    )
 
     # Build lightweight LoadedDataset for coverage plots
     prosumers = [m for m in info.raw_meters if getattr(m, "_role", "") == "prosumer"]
@@ -438,13 +507,16 @@ def cmd_inspect(args) -> None:
     print(f"\n{'='*60}")
     print("DATASET SUMMARY")
     print(f"{'='*60}")
+    global_start = min(m.start for m in info.meters)
+    global_end = max(m.end for m in info.meters)
     print(f"  Total meters:     {len(info.meters)}")
-    print(f"  Global range:     {info.global_start}  to  {info.global_end}")
-    print(f"  Common overlap:   {info.common_start}  to  {info.common_end}")
-    if not info.has_overlap:
-        print("  WARNING: No common overlap — meters have disjoint time ranges!")
+    print(f"  Global range:     {global_start}  to  {global_end}")
+    if info.suggested_start is None:
+        print("  WARNING: No complete overlap — meters have disjoint or fully-NaN time ranges!")
     else:
-        print(f"  Overlap duration: {info.overlap_days:.1f} days")
+        sug_start = pd.to_datetime(info.suggested_start, dayfirst=True)
+        sug_end = pd.to_datetime(info.suggested_end, dayfirst=True)
+        print(f"  Complete period:  {info.suggested_start}  to  {info.suggested_end}  ({(sug_end - sug_start).days} days)")
 
     if info.freq_consistent:
         print(f"  Frequency:        {info.suggested_freq} (consistent)")

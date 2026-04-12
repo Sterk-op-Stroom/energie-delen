@@ -111,14 +111,17 @@ def plot_dashboard(
     community_cost = float(pricing.total_local_cost_eur.sum())
     grid_cost = alloc_total * grid_tariff_eur_per_kwh
     total_savings = grid_cost - community_cost
+    self_cons = alloc_total / supply_total if supply_total > 0 else 0.0
 
     kpi_text = (
         f"Period: {ts[0].strftime('%d-%m-%Y')} to {ts[-1].strftime('%d-%m-%Y')}   |   "
         f"Demand: {demand_total:,.0f} kWh   |   "
         f"Supply: {supply_total:,.0f} kWh   |   "
-        f"Locally allocated: {alloc_total:,.0f} kWh ({avg_rate:.1%})   |   "
+        f"Locally allocated: {alloc_total:,.0f} kWh   |   "
         f"Grid import: {grid_imp:,.0f} kWh   |   "
         f"Grid export: {grid_exp:,.0f} kWh\n"
+        f"Self-sufficiency: {avg_rate:.1%}   |   "
+        f"Self-consumption: {self_cons:.1%}   |   "
         f"Local cost: {community_cost:,.2f} EUR   |   "
         f"Grid equivalent: {grid_cost:,.2f} EUR (@ {grid_tariff_eur_per_kwh:.2f} EUR/kWh)   |   "
         f"Community savings: {total_savings:,.2f} EUR"

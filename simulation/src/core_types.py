@@ -53,6 +53,13 @@ class AggregatedStep:
         self.n_demanders = ensure_array(self.n_demanders, np.int32)
         self.n_suppliers = ensure_array(self.n_suppliers, np.int32)
 
+    def summary(self) -> str:
+        return (
+            f"AggregatedStep: {len(self.timestamp)} steps | "
+            f"demand={float(self.demand_total.sum()):.1f} {self.unit} | "
+            f"supply={float(self.supply_total.sum()):.1f} {self.unit}"
+        )
+
 
 @dataclass
 class MeterTimeSeries:
@@ -127,6 +134,18 @@ class LoadedDataset:
         """Validate dataset consistency."""
         if not self.prosumers and not self.production_assets:
             raise ValueError("Dataset must contain at least prosumers or production assets")
+
+    def summary(self) -> str:
+        n = len(self.timestamp_index) if self.timestamp_index is not None else 0
+        period = (
+            f"{self.timestamp_index[0].date()} → {self.timestamp_index[-1].date()}"
+            if n > 0 else "no index"
+        )
+        return (
+            f"LoadedDataset: {len(self.prosumers)} prosumers | "
+            f"{len(self.production_assets)} assets | "
+            f"{n} timesteps ({period})"
+        )
 
 
 @dataclass
@@ -225,6 +244,12 @@ class SimulationConfig:
             end_ts = end_ts.tz_localize(self.tz)
         return pd.date_range(start=start_ts, end=end_ts, freq=self.freq)
 
+    def summary(self) -> str:
+        return (
+            f"SimulationConfig: {self.start} → {self.end} | "
+            f"freq={self.freq} | missing_data={self.missing_data} | nan_policy={self.nan_policy}"
+        )
+
 
 @dataclass
 class AllocationResult:
@@ -283,6 +308,16 @@ class AllocationResult:
             if len(arr) != n:
                 raise ValueError(f"{arr_name} has length {len(arr)}, expected {n}")
             setattr(self, arr_name, arr)
+
+    def summary(self) -> str:
+        allocated = sum(a.sum() for a in self.allocations.values())
+        return (
+            f"AllocationResult: strategy={self.strategy} | "
+            f"{len(self.prosumer_ids)} prosumers | "
+            f"allocated={float(allocated):.1f} {self.unit} | "
+            f"grid_import={float(self.grid_import.sum()):.1f} | "
+            f"grid_export={float(self.grid_export.sum()):.1f}"
+        )
 
 
 @dataclass
@@ -348,4 +383,14 @@ class PricingResult:
             raise ValueError(
                 f"total_local_cost_eur has length {len(self.total_local_cost_eur)}, expected {n}"
             )
+
+    def summary(self) -> str:
+        total_eur = float(self.total_local_cost_eur.sum())
+        total_kwh = sum(a.sum() for a in self.local_kwh_priced.values())
+        return (
+            f"PricingResult: strategy={self.strategy} | "
+            f"price={self.fixed_price_eur_per_kwh:.4f} EUR/kWh | "
+            f"total={total_eur:.2f} EUR | "
+            f"priced={float(total_kwh):.1f} kWh"
+        )
 

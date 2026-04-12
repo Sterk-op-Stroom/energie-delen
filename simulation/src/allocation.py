@@ -147,19 +147,25 @@ def run_allocation(
         raise ValueError("LoadedDataset contains no prosumers.")
 
     n_timesteps = len(step.timestamp)
-    mismatched = [p.meter_id for p in dataset.prosumers if len(p.value) != n_timesteps]
+
+    # Include both prosumers and production assets as potential demanders.
+    # Production assets may have positive (consumption) values and should
+    # compete equally for local supply under EqualAllocation.
+    all_meters = dataset.prosumers + dataset.production_assets
+
+    mismatched = [m.meter_id for m in all_meters if len(m.value) != n_timesteps]
     if mismatched:
         raise ValueError(
-            f"{len(mismatched)} prosumer(s) have lengths != {n_timesteps}. "
+            f"{len(mismatched)} meter(s) have lengths != {n_timesteps}. "
             f"IDs: {mismatched[:5]}. Load with a SimulationConfig to align series."
         )
 
-    prosumer_ids = [p.meter_id for p in dataset.prosumers]
-    # Clip to [0, ∞): negative prosumer values are local generation already captured
+    prosumer_ids = [m.meter_id for m in all_meters]
+    # Clip to [0, ∞): negative values are local generation already captured
     # in supply_total; we only want the consumption side here.
     demand_matrix = np.stack(
-        [np.clip(p.value, 0.0, None) for p in dataset.prosumers], axis=0
-    )  # (n_prosumers, n_timesteps)
+        [np.clip(m.value, 0.0, None) for m in all_meters], axis=0
+    )  # (n_meters, n_timesteps)
 
     return model.allocate(
         timestamp=step.timestamp,
