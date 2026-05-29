@@ -58,43 +58,43 @@ def build_kpi_row(pipeline: PipelineResult) -> pn.Column:
                        "text-transform": "uppercase", "letter-spacing": "0.05em"}
 
     kwh_row = pn.Column(
-        pn.pane.Markdown("Energy (kWh)", styles=row_label_style, margin=(8, 0, 4, 0)),
+        pn.pane.Markdown("Energie (kWh)", styles=row_label_style, margin=(8, 0, 4, 0)),
         pn.Row(
-            _card("Total Demand", f"{total_demand:,.0f}", "kWh",
-                  "Total energy consumed over the period"),
-            _card("Total Supply", f"{total_supply:,.0f}", "kWh",
-                  "Total locally generated energy available for sharing"),
+            _card("Totale Vraag", f"{total_demand:,.0f}", "kWh",
+                  "Totaal verbruikte energie over de periode"),
+            _card("Totaal Aanbod", f"{total_supply:,.0f}", "kWh",
+                  "Totaal lokaal opgewekte energie beschikbaar voor delen"),
             sizing_mode="stretch_width",
         ),
         pn.Row(
-            _card("Locally Allocated", f"{total_allocated:,.0f}", "kWh",
-                  "Local supply actually distributed to the community"),
-            _card("Grid Import", f"{grid_import:,.0f}", "kWh",
-                  "Demand not met locally; drawn from the public grid"),
-            _card("Grid Export", f"{grid_export:,.0f}", "kWh",
-                  "Local supply not consumed locally; fed back to the grid"),
+            _card("Lokaal Toegewezen", f"{total_allocated:,.0f}", "kWh",
+                  "Lokaal aanbod daadwerkelijk verdeeld aan de gemeenschap"),
+            _card("Netimport", f"{grid_import:,.0f}", "kWh",
+                  "Vraag niet lokaal gedekt; afgenomen van het openbare net"),
+            _card("Netexport", f"{grid_export:,.0f}", "kWh",
+                  "Lokaal aanbod niet lokaal verbruikt; teruggeleverd aan het net"),
             sizing_mode="stretch_width",
         ),
         sizing_mode="stretch_width",
     )
 
     pct_row = pn.Column(
-        pn.pane.Markdown("Efficiency (%)", styles=row_label_style, margin=(8, 0, 4, 0)),
+        pn.pane.Markdown("Efficiëntie (%)", styles=row_label_style, margin=(8, 0, 4, 0)),
         pn.Row(
-            _card("Self-Sufficiency", f"{self_suff:.1%}", "",
-                  "Share of total demand covered by local supply"),
-            _card("Self-Consumption", f"{self_cons:.1%}", "",
-                  "Share of local supply actually consumed within the community"),
+            _card("Zelfvoorzienendheid", f"{self_suff:.1%}", "",
+                  "Aandeel van de totale vraag gedekt door lokaal aanbod"),
+            _card("Zelfconsumptie", f"{self_cons:.1%}", "",
+                  "Aandeel van het lokale aanbod gebruikt binnen de gemeenschap"),
             sizing_mode="stretch_width",
         ),
         sizing_mode="stretch_width",
     )
 
     eur_row = pn.Column(
-        pn.pane.Markdown("Cost (EUR)", styles=row_label_style, margin=(8, 0, 4, 0)),
+        pn.pane.Markdown("Kosten (EUR)", styles=row_label_style, margin=(8, 0, 4, 0)),
         pn.Row(
-            _card("Community Cost", f"{total_cost:,.2f}", "EUR",
-                  "Total charge for locally allocated energy across all prosumers"),
+            _card("Gemeenschapskosten", f"{total_cost:,.2f}", "EUR",
+                  "Totale kosten voor lokaal toegewezen energie voor alle prosumers"),
             sizing_mode="stretch_width",
         ),
         sizing_mode="stretch_width",

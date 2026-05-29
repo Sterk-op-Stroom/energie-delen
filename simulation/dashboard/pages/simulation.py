@@ -22,14 +22,14 @@ from dashboard.state import AppState
 from dashboard.components.kpi_cards import build_kpi_row
 
 _MISSING_DATA_HELP = {
-    "fill_zero": "Fill gaps with 0 (default — missing meters treated as absent)",
-    "fill_forward": "Forward-fill gaps from the last known value",
-    "keep_nan": "Leave gaps as NaN (propagated by the aggregator)",
-    "error": "Raise an error if any meter has missing data",
+    "fill_zero": "Vul gaten op met 0 (standaard — ontbrekende meters behandeld als afwezig)",
+    "fill_forward": "Vul gaten op vanuit de laatste bekende waarde",
+    "keep_nan": "Laat gaten als NaN (doorgegeven door de aggregator)",
+    "error": "Geef een fout als een meter ontbrekende gegevens heeft",
 }
 _NAN_POLICY_HELP = {
-    "treat_as_zero": "NaN values contribute 0 to supply/demand totals",
-    "propagate": "Any NaN at a timestep makes that timestep's total NaN",
+    "treat_as_zero": "NaN-waarden dragen 0 bij aan vraag/aanbod-totalen",
+    "propagate": "Een NaN bij een tijdstap maakt het totaal van die tijdstap NaN",
 }
 
 
@@ -43,41 +43,41 @@ class SimulationPage:
         s = self._state
 
         self._start_input = pn.widgets.TextInput(
-            name="Start date (DD-MM-YYYY)",
+            name="Startdatum (DD-MM-JJJJ)",
             value=s.start_date or "01-01-2025",
             sizing_mode="stretch_width",
         )
         self._end_input = pn.widgets.TextInput(
-            name="End date (DD-MM-YYYY)",
+            name="Einddatum (DD-MM-JJJJ)",
             value=s.end_date or "07-01-2025",
             sizing_mode="stretch_width",
         )
         self._freq_select = pn.widgets.Select(
-            name="Frequency",
+            name="Frequentie",
             options=["15min", "30min", "1H"],
             value=s.freq,
             sizing_mode="stretch_width",
         )
         self._missing_select = pn.widgets.Select(
-            name="Missing data policy",
+            name="Beleid voor ontbrekende gegevens",
             options=list(_MISSING_DATA_HELP),
             value=s.missing_data,
             sizing_mode="stretch_width",
         )
         self._nan_select = pn.widgets.RadioButtonGroup(
-            name="NaN policy",
+            name="NaN-beleid",
             options=list(_NAN_POLICY_HELP),
             value=s.nan_policy,
             sizing_mode="stretch_width",
         )
         self._price_input = pn.widgets.FloatInput(
-            name="Local price (EUR / kWh)",
+            name="Lokale prijs (EUR / kWh)",
             value=s.price_eur_per_kwh,
             step=0.005,
             sizing_mode="stretch_width",
         )
         self._run_btn = pn.widgets.Button(
-            name="Run Simulation",
+            name="Simulatie starten",
             button_type="success",
             icon="play",
             sizing_mode="stretch_width",
@@ -108,7 +108,7 @@ class SimulationPage:
             "font-family:monospace;font-size:0.82em;background:#f8fafc;"
             "border:1px solid #e2e8f0;border-radius:6px;padding:8px;"
             "color:#374151'>"
-            + (_html.escape(text) if text else "<span style='color:#9ca3af'>No log yet.</span>")
+            + (_html.escape(text) if text else "<span style='color:#9ca3af'>Nog geen logboek.</span>")
             + "</div>"
         )
 
@@ -123,7 +123,7 @@ class SimulationPage:
     def _on_run(self, _event) -> None:
         s = self._state
         if not s.prosumer_path and not s.production_path:
-            s.run_status = "error: No data paths set. Go to Data Input first."
+            s.run_status = "error: Geen datapaden ingesteld. Ga eerst naar Data Input."
             return
 
         s.run_status = "running"
@@ -163,19 +163,19 @@ class SimulationPage:
         if status == "running":
             return pn.Row(
                 pn.indicators.Progress(active=True, sizing_mode="fixed", width=200),
-                pn.pane.Markdown("Running simulation…"),
+                pn.pane.Markdown("Simulatie uitvoeren…"),
             )
         if status == "done":
             pipeline = self._state.pipeline
             kpi = build_kpi_row(pipeline) if pipeline is not None else pn.pane.Markdown("")
             next_btn = pn.widgets.Button(
-                name="View Results →",
+                name="Bekijk resultaten →",
                 button_type="primary",
                 sizing_mode="stretch_width",
             )
             next_btn.on_click(lambda _: setattr(self._state, "active_page", "results"))
             return pn.Column(
-                pn.pane.Alert("Simulation complete!", alert_type="success"),
+                pn.pane.Alert("Simulatie voltooid!", alert_type="success"),
                 kpi,
                 next_btn,
             )
@@ -185,7 +185,7 @@ class SimulationPage:
 
     def panel(self) -> pn.viewable.Viewable:
         return pn.Column(
-            pn.pane.Markdown("# Simulation Settings"),
+            pn.pane.Markdown("# Simulatie-instellingen"),
             pn.Row(
                 pn.Column(
                     self._start_input,
@@ -202,7 +202,7 @@ class SimulationPage:
                     sizing_mode="stretch_width",
                 ),
             ),
-            pn.pane.Markdown("**NaN policy** (aggregation stage)"),
+            pn.pane.Markdown("**NaN-beleid** (aggregatiefase)"),
             self._nan_select,
             pn.pane.Markdown(
                 "\n".join(f"- **{k}**: {v}" for k, v in _NAN_POLICY_HELP.items()),
@@ -211,7 +211,7 @@ class SimulationPage:
             self._price_input,
             pn.layout.Divider(),
             self._run_btn,
-            pn.pane.Markdown("**Pipeline log**", margin=(8, 0, 2, 0)),
+            pn.pane.Markdown("**Pipeline-logboek**", margin=(8, 0, 2, 0)),
             self._log_pane,
             pn.bind(lambda _: self._status_panel(), self._state.param.run_status),
             sizing_mode="stretch_width",

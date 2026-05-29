@@ -37,10 +37,10 @@ _EXPORT_COLOR = "#8b5cf6"
 _COST_COLOR = "#0ea5e9"
 
 _AGG_OPTIONS = {
-    "Raw (15 min)": None,
-    "Hourly": "1h",
-    "Daily": "1D",
-    "Weekly": "1W",
+    "Onbewerkt (15 min)": None,
+    "Per uur": "1h",
+    "Dagelijks": "1D",
+    "Wekelijks": "1W",
 }
 
 
@@ -60,16 +60,16 @@ class ResultsPage:
         end_dt = ts[-1].to_pydatetime()
 
         date_slider = pn.widgets.DateRangeSlider(
-            name="Date range",
+            name="Datumbereik",
             start=start_dt,
             end=end_dt,
             value=(start_dt, end_dt),
             sizing_mode="stretch_width",
         )
         agg_select = pn.widgets.Select(
-            name="Aggregation",
+            name="Aggregatie",
             options=list(_AGG_OPTIONS),
-            value="Raw (15 min)",
+            value="Onbewerkt (15 min)",
             width=200,
         )
 
@@ -107,7 +107,7 @@ class ResultsPage:
                     y=["demand_kWh", "supply_kWh"],
                     alpha=0.6,
                     color=[_DEMAND_COLOR, _SUPPLY_COLOR],
-                    title="Supply vs Demand (kWh)",
+                    title="Aanbod vs Vraag (kWh)",
                     responsive=True,
                     min_height=280,
                     legend="top_left",
@@ -120,7 +120,7 @@ class ResultsPage:
                     y=["local_allocation_kWh", "grid_import_kWh"],
                     alpha=0.6,
                     color=[_ALLOC_COLOR, _IMPORT_COLOR],
-                    title="Energy Flows (kWh)",
+                    title="Energiestromen (kWh)",
                     responsive=True,
                     min_height=280,
                     legend="top_left",
@@ -132,7 +132,7 @@ class ResultsPage:
                 )
                 charts.append(pn.pane.HoloViews(chart2, sizing_mode="stretch_width"))
 
-            return pn.Column(*charts, sizing_mode="stretch_width") if charts else pn.pane.Markdown("No data in range.")
+            return pn.Column(*charts, sizing_mode="stretch_width") if charts else pn.pane.Markdown("Geen gegevens in dit bereik.")
 
         # -- Sub-tab 2: Self-Sufficiency + Self-Consumption --
         @pn.depends(date_slider.param.value, agg_select.param.value)
@@ -147,7 +147,7 @@ class ResultsPage:
                     y="self_sufficiency_pct",
                     ylim=(0, 1.05),
                     color=_ALLOC_COLOR,
-                    title="Self-Sufficiency Rate  (local allocation ÷ demand)",
+                    title="Zelfvoorzieningspercentage  (lokale toewijzing ÷ vraag)",
                     responsive=True,
                     min_height=240,
                 )
@@ -159,7 +159,7 @@ class ResultsPage:
                     y="self_consumption_pct",
                     ylim=(0, 1.05),
                     color=_SUPPLY_COLOR,
-                    title="Self-Consumption Rate  (local allocation ÷ supply)",
+                    title="Zelfconsumptiepercentage  (lokale toewijzing ÷ aanbod)",
                     responsive=True,
                     min_height=240,
                 )
@@ -183,14 +183,14 @@ class ResultsPage:
                         x="timestamp",
                         y="allocated_kWh",
                         by="meter_id",
-                        title=f"Per-Prosumer Allocation ({n_prosumers} meters)",
+                        title=f"Toewijzing per prosumer ({n_prosumers} meters)",
                         responsive=True,
                         min_height=280,
                         legend="right",
                     )
                     charts.append(pn.pane.HoloViews(chart5, sizing_mode="stretch_width"))
 
-            return pn.Column(*charts, sizing_mode="stretch_width") if charts else pn.pane.Markdown("No data in range.")
+            return pn.Column(*charts, sizing_mode="stretch_width") if charts else pn.pane.Markdown("Geen gegevens in dit bereik.")
 
         # -- Sub-tab 3: Cost --
         @pn.depends(date_slider.param.value, agg_select.param.value)
@@ -205,7 +205,7 @@ class ResultsPage:
                     y="cost_eur",
                     alpha=0.6,
                     color=_COST_COLOR,
-                    title="Community Cost (EUR)",
+                    title="Gemeenschapskosten (EUR)",
                     responsive=True,
                     min_height=280,
                 )
@@ -229,20 +229,20 @@ class ResultsPage:
                         x="timestamp",
                         y="cost_eur",
                         by="meter_id",
-                        title=f"Per-Prosumer Cost ({n_prosumers} meters)",
+                        title=f"Kosten per prosumer ({n_prosumers} meters)",
                         responsive=True,
                         min_height=280,
                         legend="right",
                     )
                     charts.append(pn.pane.HoloViews(chart6, sizing_mode="stretch_width"))
 
-            return pn.Column(*charts, sizing_mode="stretch_width") if charts else pn.pane.Markdown("No data in range.")
+            return pn.Column(*charts, sizing_mode="stretch_width") if charts else pn.pane.Markdown("Geen gegevens in dit bereik.")
 
         inner_tabs = pn.Tabs(
-            ("Energy Flows", _energy_charts),
-            ("Self-Sufficiency & Consumption", _efficiency_charts),
-            ("Cost", _cost_charts),
-            ("Average Profile", self._profile_tab(pipeline)),
+            ("Energiestromen", _energy_charts),
+            ("Zelfvoorzienendheid & consumptie", _efficiency_charts),
+            ("Kosten", _cost_charts),
+            ("Gemiddeld profiel", self._profile_tab(pipeline)),
             dynamic=True,
             sizing_mode="stretch_width",
         )
@@ -263,13 +263,21 @@ class ResultsPage:
         profiles = available_profiles(pipeline.step)
         if not profiles:
             return pn.pane.Alert(
-                "Not enough data to compute an average profile (need at least 2 days).",
+                "Onvoldoende gegevens voor een gemiddeld profiel (minimaal 2 dagen vereist).",
                 alert_type="warning",
             )
 
+        _PROFILE_NL = {
+            "Daily": "Dagelijks",
+            "Weekly": "Wekelijks",
+            "Yearly": "Jaarlijks",
+        }
+        _PROFILE_FROM_NL = {v: k for k, v in _PROFILE_NL.items()}
+        profiles_nl = [_PROFILE_NL[p] for p in profiles]
+
         toggle = pn.widgets.RadioButtonGroup(
-            options=profiles,
-            value=profiles[0],
+            options=profiles_nl,
+            value=profiles_nl[0],
             button_type="default",
             button_style="outline",
         )
@@ -280,28 +288,29 @@ class ResultsPage:
             "Yearly": "day_of_year",
         }
         _TITLES = {
-            "Daily": "Average Daily Profile (mean kWh per 15-min slot)",
-            "Weekly": "Average Weekly Profile (mean kWh per 15-min slot)",
-            "Yearly": "Average Yearly Profile (mean daily kWh per day-of-year)",
+            "Daily": "Gemiddeld dagprofiel (gemiddeld kWh per kwartier)",
+            "Weekly": "Gemiddeld weekprofiel (gemiddeld kWh per kwartier)",
+            "Yearly": "Gemiddeld jaarprofiel (gemiddelde dagelijkse kWh per dag van het jaar)",
         }
         _XLABELS = {
-            "Daily": "Hour of day",
-            "Weekly": "Day of week",
-            "Yearly": "Day of year",
+            "Daily": "Uur van de dag",
+            "Weekly": "Dag van de week",
+            "Yearly": "Dag van het jaar",
         }
         _YLABELS = {
-            "Daily": "kWh (mean per slot)",
-            "Weekly": "kWh (mean per slot)",
-            "Yearly": "kWh (mean daily total)",
+            "Daily": "kWh (gemiddeld per tijdvak)",
+            "Weekly": "kWh (gemiddeld per tijdvak)",
+            "Yearly": "kWh (gemiddeld dagelijks totaal)",
         }
         # week_position tick positions and labels (at start of each day)
-        _WEEK_XTICKS = [(i, d) for i, d in enumerate(["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"])]
+        _WEEK_XTICKS = [(i, d) for i, d in enumerate(["Ma", "Di", "Wo", "Do", "Vr", "Za", "Zo"])]
 
         # Pre-compute all needed profile DataFrames
         _dfs = {p: make_avg_profile_df(pipeline.step, p) for p in profiles}
 
         @pn.depends(toggle.param.value)
-        def _chart(profile):
+        def _chart(profile_nl):
+            profile = _PROFILE_FROM_NL[profile_nl]
             df = _dfs[profile]
             x = _X_LABELS[profile]
 
@@ -314,7 +323,7 @@ class ResultsPage:
                 y="demand_kWh",
                 alpha=0.4,
                 color=_DEMAND_COLOR,
-                label="Demand",
+                label="Vraag",
                 responsive=True,
                 min_height=320,
             ) * df.hvplot.line(
@@ -329,7 +338,7 @@ class ResultsPage:
                 y="supply_kWh",
                 alpha=0.4,
                 color=_SUPPLY_COLOR,
-                label="Supply",
+                label="Aanbod",
             ) * df.hvplot.line(
                 x=x,
                 y="supply_kWh",
@@ -371,13 +380,13 @@ class ResultsPage:
         prosumer_dl = pn.widgets.FileDownload(
             callback=lambda: io.BytesIO(prosumer_csv_bytes(pipeline)),
             filename="prosumer_summary.csv",
-            label="Download Prosumer CSV",
+            label="Download prosumer-CSV",
             button_type="primary",
         )
         timeseries_dl = pn.widgets.FileDownload(
             callback=lambda: io.BytesIO(timeseries_csv_bytes(pipeline)),
             filename="timeseries.csv",
-            label="Download Time Series CSV",
+            label="Download tijdreeks-CSV",
             button_type="light",
         )
 
@@ -394,19 +403,19 @@ class ResultsPage:
     def _content(self, pipeline) -> pn.viewable.Viewable:
         if pipeline is None:
             return pn.pane.Alert(
-                "No simulation results yet. Run the simulation first.",
+                "Nog geen simulatieresultaten. Voer eerst de simulatie uit.",
                 alert_type="warning",
             )
         return pn.Tabs(
-            ("Explore", self._explore_tab(pipeline)),
-            ("Prosumer Table", self._table_tab(pipeline)),
+            ("Verkennen", self._explore_tab(pipeline)),
+            ("Prosumertabel", self._table_tab(pipeline)),
             dynamic=True,
             sizing_mode="stretch_width",
         )
 
     def panel(self) -> pn.viewable.Viewable:
         return pn.Column(
-            pn.pane.Markdown("# Results"),
+            pn.pane.Markdown("# Resultaten"),
             pn.bind(self._content, self._state.param.pipeline),
             sizing_mode="stretch_width",
         )

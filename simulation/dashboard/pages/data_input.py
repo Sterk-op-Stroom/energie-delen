@@ -37,37 +37,37 @@ class DataInputPage:
 
         # --- Prosumer input ---
         self._prosumer_path_input = pn.widgets.TextInput(
-            name="Prosumer path (file or folder)",
-            placeholder="/path/to/prosumers.parquet  or  /path/to/folder/",
+            name="Prosumer pad (bestand of map)",
+            placeholder="/pad/naar/prosumers.parquet  of  /pad/naar/map/",
             sizing_mode="stretch_width",
         )
         self._prosumer_upload = pn.widgets.FileInput(
-            name="or upload a single file",
+            name="of upload een enkel bestand",
             accept=".parquet",
             sizing_mode="stretch_width",
         )
 
         # --- Production input ---
         self._production_path_input = pn.widgets.TextInput(
-            name="Production assets path (file or folder)",
-            placeholder="/path/to/production.parquet  or  /path/to/folder/",
+            name="Productie-assets pad (bestand of map)",
+            placeholder="/pad/naar/production.parquet  of  /pad/naar/map/",
             sizing_mode="stretch_width",
         )
         self._production_upload = pn.widgets.FileInput(
-            name="or upload a single file",
+            name="of upload een enkel bestand",
             accept=".parquet",
             sizing_mode="stretch_width",
         )
 
         # --- Action buttons ---
         self._sample_btn = pn.widgets.Button(
-            name="Load Sample Data",
+            name="Laad voorbeelddata",
             button_type="light",
             icon="database",
             sizing_mode="stretch_width",
         )
         self._inspect_btn = pn.widgets.Button(
-            name="Load & Inspect",
+            name="Laad & inspecteer",
             button_type="primary",
             icon="search",
             sizing_mode="stretch_width",
@@ -102,7 +102,7 @@ class DataInputPage:
 
     def _on_sample(self, _event) -> None:
         import tempfile
-        self._status_pane.object = "Generating sample data…"
+        self._status_pane.object = "Voorbeelddata genereren…"
         tmpdir = Path(tempfile.mkdtemp(prefix="energie_demo_"))
         prosumer_path, production_path = SampleDataGenerator.generate_sample_dataset(
             output_dir=tmpdir, num_prosumers=5, num_assets=2, num_days=7
@@ -111,7 +111,7 @@ class DataInputPage:
         self._state.production_path = production_path
         self._prosumer_path_input.value = str(prosumer_path)
         self._production_path_input.value = str(production_path)
-        self._status_pane.object = f"Sample data ready in `{tmpdir}`"
+        self._status_pane.object = f"Voorbeelddata klaar in `{tmpdir}`"
 
     def _on_inspect(self, _event) -> None:
         # Resolve paths from text inputs (may differ from uploaded temp files)
@@ -122,14 +122,14 @@ class DataInputPage:
         production_path = Path(a_str) if a_str else self._state.production_path
 
         if not prosumer_path and not production_path:
-            self._status_pane.object = "⚠ Please provide at least one data path."
+            self._status_pane.object = "⚠ Geef ten minste één datapad op."
             return
 
         self._state.prosumer_path = prosumer_path
         self._state.production_path = production_path
         self._state.inspect_status = "loading"
         self._state.inspect_result = None
-        self._status_pane.object = "Loading and inspecting data…"
+        self._status_pane.object = "Data laden en inspecteren…"
         self._inspect_btn.disabled = True
 
         def _worker() -> None:
@@ -140,7 +140,7 @@ class DataInputPage:
                 )
                 self._state.inspect_result = result
                 self._state.inspect_status = "done"
-                self._status_pane.object = "Inspect complete."
+                self._status_pane.object = "Inspectie voltooid."
             except Exception as exc:  # noqa: BLE001
                 self._state.inspect_status = f"error: {exc}"
                 self._status_pane.object = f"⚠ {exc}"
@@ -194,7 +194,7 @@ class DataInputPage:
         )
         a_tab = pn.widgets.Tabulator(
             pd.DataFrame(asset_rows) if asset_rows else pd.DataFrame(),
-            name=f"Production Assets ({len(asset_rows)})",
+            name=f"Productie-assets ({len(asset_rows)})",
             show_index=False,
             pagination="remote",
             page_size=15,
@@ -202,10 +202,10 @@ class DataInputPage:
         )
 
         return pn.Column(
-            pn.pane.Markdown("## Meters found"),
+            pn.pane.Markdown("## Meters gevonden"),
             pn.Row(
                 pn.Column(pn.pane.Markdown(f"**Prosumers — {len(prosumer_rows)}**"), p_tab),
-                pn.Column(pn.pane.Markdown(f"**Production Assets — {len(asset_rows)}**"), a_tab),
+                pn.Column(pn.pane.Markdown(f"**Productie-assets — {len(asset_rows)}**"), a_tab),
             ),
             sizing_mode="stretch_width",
         )
@@ -222,17 +222,17 @@ class DataInputPage:
             sug_start = pd.to_datetime(result.suggested_start, dayfirst=True)
             sug_end = pd.to_datetime(result.suggested_end, dayfirst=True)
             complete_days = (sug_end - sug_start).days
-        no_overlap_warn = "" if has_complete else "\n\n⚠ **No complete overlap between prosumer and asset data.**"
+        no_overlap_warn = "" if has_complete else "\n\n⚠ **Geen volledige overlap tussen prosumer- en assetdata.**"
         summary_md = f"""
-## Inspect Results
+## Inspectierapport
 
 | | |
 |---|---|
-| **Suggested start** | `{result.suggested_start}` |
-| **Suggested end** | `{result.suggested_end}` |
-| **Suggested frequency** | `{result.suggested_freq}` |
-| **Complete period** | {f"{complete_days} days" if has_complete else "n/a"} |
-| **Freq consistent** | {"yes" if result.freq_consistent else "no ⚠"} |
+| **Voorgestelde start** | `{result.suggested_start}` |
+| **Voorgesteld einde** | `{result.suggested_end}` |
+| **Voorgestelde frequentie** | `{result.suggested_freq}` |
+| **Volledige periode** | {f"{complete_days} dagen" if has_complete else "n/a"} |
+| **Frequentie consistent** | {"ja" if result.freq_consistent else "nee ⚠"} |
 {no_overlap_warn}
 """
         summary = pn.pane.Markdown(summary_md)
@@ -242,7 +242,7 @@ class DataInputPage:
 
         # Pre-fill simulation settings and navigate
         next_btn = pn.widgets.Button(
-            name="Next: Simulation Settings →",
+            name="Volgende: Simulatie-instellingen →",
             button_type="success",
             sizing_mode="stretch_width",
         )
@@ -260,7 +260,7 @@ class DataInputPage:
         import hvplot.pandas  # noqa: F401
 
         if not result.raw_meters:
-            return pn.pane.Markdown("_No meter data to display._")
+            return pn.pane.Markdown("_Geen meterdata beschikbaar._")
 
         # Build expected index over the full global extent so all data is visible.
         # Must be tz-aware (UTC) to match meter timestamps.
@@ -285,25 +285,25 @@ class DataInputPage:
         n_total_days = max(1, (expected_index[-1] - expected_index[0]).days + 1)
         _HEATMAP_RESOLUTIONS = {}  # label -> pandas resample freq
         if n_total_days <= 366:
-            _HEATMAP_RESOLUTIONS["Daily"] = "1D"
+            _HEATMAP_RESOLUTIONS["Dagelijks"] = "1D"
         if n_total_days >= 14:
-            _HEATMAP_RESOLUTIONS["Weekly"] = "1W"
+            _HEATMAP_RESOLUTIONS["Wekelijks"] = "1W"
         if n_total_days >= 28:
-            _HEATMAP_RESOLUTIONS["Monthly"] = "MS"
+            _HEATMAP_RESOLUTIONS["Maandelijks"] = "MS"
         if n_total_days >= 90:
-            _HEATMAP_RESOLUTIONS["Quarterly"] = "QS"
+            _HEATMAP_RESOLUTIONS["Kwartaal"] = "QS"
         if not _HEATMAP_RESOLUTIONS:
-            _HEATMAP_RESOLUTIONS["Daily"] = "1D"
+            _HEATMAP_RESOLUTIONS["Dagelijks"] = "1D"
 
         # Default resolution: ~12 columns
         if n_total_days <= 14:
-            _heatmap_default = "Daily"
+            _heatmap_default = "Dagelijks"
         elif n_total_days <= 90:
-            _heatmap_default = "Weekly"
+            _heatmap_default = "Wekelijks"
         elif n_total_days <= 365:
-            _heatmap_default = "Monthly"
+            _heatmap_default = "Maandelijks"
         else:
-            _heatmap_default = "Quarterly"
+            _heatmap_default = "Kwartaal"
 
         def _build_heatmap_df(freq: str) -> pd.DataFrame:
             rows = []
@@ -321,7 +321,7 @@ class DataInputPage:
                 _build_heatmap_df(freq).hvplot.heatmap(
                     x="date", y="meter_id", C="coverage",
                     cmap="RdYlGn", clim=(0, 1),
-                    title=f"Coverage Heatmap ({label})",
+                    title=f"Dekkingsheatmap ({label})",
                     responsive=True, min_height=chart_height,
                     rot=45,
                 ),
@@ -337,7 +337,7 @@ class DataInputPage:
         )
         heatmap_pane = pn.Column(
             pn.Row(
-                pn.pane.Markdown("**Resolution:**", margin=(8, 6, 0, 0)),
+                pn.pane.Markdown("**Resolutie:**", margin=(8, 6, 0, 0)),
                 _res_selector,
             ),
             pn.bind(lambda res: _heatmap_panes[res], _res_selector),
@@ -355,8 +355,8 @@ class DataInputPage:
             bars_df.hvplot.barh(
                 x="meter_id", y="missing_pct",
                 color="#ef4444", alpha=0.7,
-                xlabel="Missing (%)", ylabel="",
-                title="Missing Data % per Meter",
+                xlabel="Ontbrekend (%)", ylabel="",
+                title="Ontbrekende data % per meter",
                 responsive=True, min_height=chart_height,
             ),
             sizing_mode="stretch_width",
@@ -379,7 +379,7 @@ class DataInputPage:
                 y=["present", "missing"],
                 stacked=True,
                 color=["#22c55e", "#ef4444"], alpha=0.6,
-                ylabel="Meters", title="Coverage Over Time",
+                ylabel="Meters", title="Dekking over tijd",
                 responsive=True, min_height=300,
                 hover=False,
             ),
@@ -388,15 +388,15 @@ class DataInputPage:
 
         # RadioButtonGroup acts as the tab bar — more reliable than pn.Tabs
         # inside a reactive pn.bind context; Timeline shown first
-        _CHART_OPTIONS = ["Timeline", "Coverage Heatmap", "Missing %"]
+        _CHART_OPTIONS = ["Tijdlijn", "Dekkingsheatmap", "Ontbrekend %"]
         _CHART_MAP = {
-            "Coverage Heatmap": heatmap_pane,
-            "Missing %": bars_pane,
-            "Timeline": timeline_pane,
+            "Dekkingsheatmap": heatmap_pane,
+            "Ontbrekend %": bars_pane,
+            "Tijdlijn": timeline_pane,
         }
         selector = pn.widgets.RadioButtonGroup(
             options=_CHART_OPTIONS,
-            value="Timeline",
+            value="Tijdlijn",
             button_type="light",
             sizing_mode="stretch_width",
         )
@@ -423,9 +423,9 @@ class DataInputPage:
 
     def panel(self) -> pn.viewable.Viewable:
         return pn.Column(
-            pn.pane.Markdown("# Data Input"),
+            pn.pane.Markdown("# Gegevensinvoer"),
             # Step 1: path selection
-            pn.pane.Markdown("## Step 1: Select your data"),
+            pn.pane.Markdown("## Stap 1: Selecteer uw gegevens"),
             pn.Row(
                 pn.Column(
                     self._prosumer_path_input,

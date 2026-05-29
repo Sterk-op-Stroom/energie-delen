@@ -70,12 +70,12 @@ def create_app() -> pn.Template:
         sizing_mode="stretch_width",
     )
     nav_sim = pn.widgets.Button(
-        name="2 · Simulation",
+        name="2 · Simulatie",
         button_type="light",
         sizing_mode="stretch_width",
     )
     nav_results = pn.widgets.Button(
-        name="3 · Results",
+        name="3 · Resultaten",
         button_type="light",
         sizing_mode="stretch_width",
     )
@@ -101,14 +101,14 @@ def create_app() -> pn.Template:
     nav_results.disabled = True  # initial state
 
     sidebar_content = pn.Column(
-        pn.pane.Markdown("### Navigation", margin=(10, 5)),
+        pn.pane.Markdown("### Navigatie", margin=(10, 5)),
         nav_data,
         nav_sim,
         nav_results,
         pn.layout.Divider(),
         pn.pane.Markdown(
             "Energie Delen\n\n"
-            "[Data formats](docs/data_formats.md) · "
+            "[Data format](docs/data_formats.md) · "
             "[Privacy](docs/PRIVACY.md)",
             styles={"font-size": "0.8em", "color": "#9ca3af"},
         ),
