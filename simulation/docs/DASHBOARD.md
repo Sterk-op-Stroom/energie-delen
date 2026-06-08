@@ -103,7 +103,7 @@ Configure and run the pipeline.
 |-----------|-------------|---------|
 | **Start date** | Simulation window start (DD-MM-YYYY) | From inspect |
 | **End date** | Simulation window end (DD-MM-YYYY) | From inspect |
-| **Frequency** | Timestep resolution: `15min`, `30min`, or `1H` | From inspect |
+| **Frequency** | Timestep resolution — enter a number and choose `min` or `sec` (e.g. 15 min, 30 sec). Toggle **Automatisch detecteren** to use the frequency inferred from the data. | From inspect |
 | **Missing data policy** | How to handle gaps in meter data | `fill_zero` |
 | **NaN policy** | How NaN values behave during aggregation | `treat_as_zero` |
 | **Local price (EUR/kWh)** | Fixed price charged for locally shared energy | `0.075` |

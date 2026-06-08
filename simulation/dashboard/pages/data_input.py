@@ -412,9 +412,7 @@ class DataInputPage:
             if result.suggested_end:
                 self._state.end_date = result.suggested_end
             if result.suggested_freq:
-                freq = result.suggested_freq
-                if freq in ["15min", "30min", "1H"]:
-                    self._state.freq = freq
+                self._state.freq = result.suggested_freq
         self._state.active_page = "simulation"
 
     # ------------------------------------------------------------------

@@ -28,7 +28,8 @@ class AppState(param.Parameterized):
     # --- Simulation config (set by SimulationPage widgets) ---
     start_date = param.String(default="", doc="Simulation start in DD-MM-YYYY format")
     end_date = param.String(default="", doc="Simulation end in DD-MM-YYYY format")
-    freq = param.Selector(default="15min", objects=["15min", "30min", "1H"])
+    freq = param.String(default="15min", doc="Pandas frequency string, e.g. '15min', '30S'")
+    freq_infer = param.Boolean(default=False, doc="Infer frequency from data instead of manual entry")
     missing_data = param.Selector(
         default="fill_zero",
         objects=["fill_zero", "fill_forward", "keep_nan", "error"],
