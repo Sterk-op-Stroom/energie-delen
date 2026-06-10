@@ -21,10 +21,10 @@ if exist "%USERPROFILE%\.local\bin\uv.exe" (
 )
 
 :: uv not found — install it
-echo uv not found. Installing uv (one-time setup)...
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+echo Setting up (one-time, this may take a moment)...
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex" >nul 2>&1
 if not exist "%USERPROFILE%\.local\bin\uv.exe" (
-    echo ERROR: uv installation failed. Please install uv manually from https://docs.astral.sh/uv/
+    echo ERROR: Setup failed. Please install uv manually from https://docs.astral.sh/uv/
     pause
     exit /b 1
 )
@@ -35,4 +35,5 @@ set "UV=%USERPROFILE%\.local\bin\uv.exe"
 cd /d "%~dp0"
 
 echo Starting Energie Delen dashboard...
-"%UV%" run --group dashboard panel serve dashboard/app.py --show
+echo Dashboard running. Your browser will open automatically. Press Ctrl+C to stop.
+"%UV%" run --quiet --group dashboard panel serve dashboard/app.py --show 2>nul

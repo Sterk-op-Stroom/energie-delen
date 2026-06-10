@@ -13,10 +13,10 @@ if command -v uv &>/dev/null; then
 elif [ -x "$HOME/.local/bin/uv" ]; then
     UV="$HOME/.local/bin/uv"
 else
-    echo "uv not found. Installing uv (one-time setup)..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+    echo "Setting up (one-time, this may take a moment)..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh >/dev/null 2>&1
     if [ ! -x "$HOME/.local/bin/uv" ]; then
-        echo "ERROR: uv installation failed. Please install uv manually: https://docs.astral.sh/uv/"
+        echo "ERROR: Setup failed. Please install uv manually: https://docs.astral.sh/uv/"
         exit 1
     fi
     UV="$HOME/.local/bin/uv"
@@ -26,4 +26,5 @@ fi
 cd "$(dirname "$0")"
 
 echo "Starting Energie Delen dashboard..."
-"$UV" run --group dashboard panel serve dashboard/app.py --show
+echo "Dashboard running. Your browser will open automatically. Press Ctrl+C to stop."
+"$UV" run --quiet --group dashboard panel serve dashboard/app.py --show 2>/dev/null
