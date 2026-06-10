@@ -39,5 +39,4 @@
 | Aggregator (`src/aggregator.py`) | `LoadedDataset` | `AggregatedStep` |
 | Allocation (`src/allocation.py`) | `LoadedDataset` + `AggregatedStep` | `AllocationResult` |
 | Pricing (`src/pricing.py`) | `AllocationResult` | `PricingResult` |
-| Visualization (`src/viz/`) | Any result dataclass | `matplotlib.Figure` |
 | Dashboard (`dashboard/`) | `PipelineResult` (via Panel/hvplot) | Interactive browser UI |

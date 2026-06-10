@@ -20,7 +20,7 @@ from src.core_types import (
 )
 from src.loader import DatasetLoader, MeterLoader
 from src.pricing import FixedPricePricing, run_pricing
-from src.report_types import CoverageReport, InspectResult, MeterInfo
+from src.report_types import InspectResult, MeterInfo
 from src.sample_data import SampleDataGenerator
 from src.utils import infer_freq
 
@@ -61,15 +61,8 @@ def run_pipeline(
     missing_data: str = "fill_zero",
     nan_policy: str = "treat_as_zero",
     price_eur_per_kwh: float = 0.075,
-    plot: Path | str | None = None,
 ) -> PipelineResult:
-    """Run the full simulation pipeline: load → aggregate → allocate → price.
-
-    Args:
-        plot: Optional path for visualization report. If the path ends in
-            '.pdf', a multi-page PDF is generated; otherwise a directory
-            of numbered PNGs is created.
-    """
+    """Run the full simulation pipeline: load → aggregate → allocate → price."""
     if not prosumer_path and not production_path:
         raise ValueError("Provide at least prosumer_path or production_path")
 
@@ -135,99 +128,7 @@ def run_pipeline(
 
     print("\nDone.")
 
-    pipeline = PipelineResult(dataset, step, allocation, result, simulation_config)
-
-    if plot is not None:
-        save_report(pipeline, Path(plot))
-
-    return pipeline
-
-
-def save_report(pipeline: PipelineResult, output_path: Path) -> None:
-    """Generate and save a multi-page PDF (or PNG) visualization report."""
-    # import matplotlib
-    # matplotlib.use("Agg")  # non-interactive backend
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_pdf import PdfPages
-
-    from src.viz.supply_demand import (
-        plot_supply_vs_demand,
-        plot_supply_demand_ratio,
-        plot_daily_profile,
-        plot_active_participants,
-        plot_weekly_heatmap,
-    )
-    from src.viz.allocation import (
-        plot_energy_flow,
-        plot_self_sufficiency,
-        plot_prosumer_allocation_heatmap,
-        plot_allocation_fairness,
-        plot_grid_dependency,
-        plot_curtailment,
-    )
-    from src.viz.pricing import (
-        plot_community_cost,
-        plot_prosumer_cost_bars,
-        plot_cost_vs_kwh,
-        plot_cumulative_cost,
-        plot_savings_estimate,
-    )
-    from src.viz.coverage import (
-        plot_coverage_heatmap,
-        plot_missing_fraction_bars,
-        plot_coverage_timeline,
-    )
-    from src.viz.dashboard import plot_dashboard
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    ds = pipeline.dataset
-    step = pipeline.step
-    alloc = pipeline.allocation
-    price = pipeline.pricing
-    cfg = pipeline.config
-
-    # Collect all figures
-    figures = []
-    figures.append(("Dashboard", plot_dashboard(step, alloc, price)))
-    figures.append(("Supply vs Demand", plot_supply_vs_demand(step)))
-    figures.append(("Supply/Demand Ratio", plot_supply_demand_ratio(step)))
-    figures.append(("Daily Profile", plot_daily_profile(step)))
-    figures.append(("Active Participants", plot_active_participants(step)))
-    figures.append(("Weekly Heatmap", plot_weekly_heatmap(step)))
-    figures.append(("Energy Flow", plot_energy_flow(alloc, step)))
-    figures.append(("Self-Sufficiency", plot_self_sufficiency(alloc, step)))
-    figures.append(("Allocation Heatmap", plot_prosumer_allocation_heatmap(alloc)))
-    figures.append(("Allocation Fairness", plot_allocation_fairness(alloc)))
-    figures.append(("Grid Dependency", plot_grid_dependency(alloc, step)))
-    figures.append(("Curtailment", plot_curtailment(alloc)))
-    figures.append(("Community Cost", plot_community_cost(price)))
-    figures.append(("Prosumer Cost Bars", plot_prosumer_cost_bars(price)))
-    figures.append(("Cost vs kWh", plot_cost_vs_kwh(price)))
-    figures.append(("Cumulative Cost", plot_cumulative_cost(price)))
-    figures.append(("Savings Estimate", plot_savings_estimate(price)))
-
-    # Coverage plots (need expected index)
-    expected_index = cfg.to_index()
-    figures.append(("Coverage Heatmap", plot_coverage_heatmap(ds, expected_index)))
-    figures.append(("Coverage Timeline", plot_coverage_timeline(ds, expected_index)))
-
-    if str(output_path).lower().endswith(".pdf"):
-        with PdfPages(output_path) as pdf:
-            for name, fig in figures:
-                pdf.savefig(fig, bbox_inches="tight")
-                plt.close(fig)
-        print(f"\nReport saved: {output_path} ({len(figures)} pages)")
-    else:
-        # Save as individual PNGs in a directory
-        output_path.mkdir(parents=True, exist_ok=True)
-        for i, (name, fig) in enumerate(figures):
-            safe_name = name.lower().replace(" ", "_").replace("/", "_")
-            fname = f"{i:02d}_{safe_name}.png"
-            fig.savefig(output_path / fname, bbox_inches="tight", dpi=150)
-            plt.close(fig)
-        print(f"\nReport saved: {output_path}/ ({len(figures)} images)")
+    return PipelineResult(dataset, step, allocation, result, simulation_config)
 
 
 def _find_longest_complete_period(
@@ -293,7 +194,6 @@ def _find_longest_complete_period(
 def inspect_dataset(
     prosumer_path: Path | None = None,
     production_path: Path | None = None,
-    plot: Path | str | None = None,
 ) -> InspectResult:
     """Inspect raw meter data and return structured metadata.
 
@@ -374,7 +274,7 @@ def inspect_dataset(
         suggested_start = None
         suggested_end = None
 
-    result = InspectResult(
+    return InspectResult(
         meters=sorted(meter_infos, key=lambda m: m.meter_id),
         frequencies=frequencies,
         freq_consistent=freq_consistent,
@@ -383,74 +283,6 @@ def inspect_dataset(
         suggested_freq=suggested_freq,
         raw_meters=raw_meters,
     )
-
-    if plot is not None:
-        save_coverage_report(result, Path(plot))
-
-    return result
-
-
-def save_coverage_report(info: InspectResult, output_path: Path) -> None:
-    """Generate and save coverage plots from an InspectResult."""
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    from src.viz.coverage import plot_coverage_heatmap, plot_coverage_timeline, plot_missing_fraction_bars
-
-    # Build expected index over the full global extent so all data is visible.
-    expected_index = pd.date_range(
-        start=min(m.start for m in info.meters),
-        end=max(m.end for m in info.meters),
-        freq=info.suggested_freq,
-        tz="UTC",
-    )
-
-    # Build lightweight LoadedDataset for coverage plots
-    prosumers = [m for m in info.raw_meters if getattr(m, "_role", "") == "prosumer"]
-    assets = [m for m in info.raw_meters if getattr(m, "_role", "") == "asset"]
-    dataset = LoadedDataset(
-        prosumers=prosumers if prosumers else assets,
-        production_assets=assets if prosumers else [],
-        timestamp_index=expected_index,
-    )
-
-    # Coverage report for missing fraction bars
-    per_meter_missing_fraction = {}
-    for m in info.raw_meters:
-        vals = pd.Series(m.value, index=m.timestamp).reindex(expected_index)
-        missing_frac = float(vals.isna().sum() / len(vals)) if len(vals) > 0 else 1.0
-        per_meter_missing_fraction[m.meter_id] = missing_frac
-
-    report = CoverageReport(
-        per_meter_missing_fraction=per_meter_missing_fraction,
-        per_meter_missing_count={
-            k: int(v * len(expected_index)) for k, v in per_meter_missing_fraction.items()
-        },
-    )
-
-    figures = [
-        ("Coverage Heatmap", plot_coverage_heatmap(dataset, expected_index)),
-        ("Missing Fraction", plot_missing_fraction_bars(report)),
-        ("Coverage Timeline", plot_coverage_timeline(dataset, expected_index)),
-    ]
-
-    output_path = Path(output_path)
-    if str(output_path).lower().endswith(".pdf"):
-        from matplotlib.backends.backend_pdf import PdfPages
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with PdfPages(output_path) as pdf:
-            for _name, fig in figures:
-                pdf.savefig(fig, bbox_inches="tight")
-                plt.close(fig)
-        print(f"\nCoverage report saved: {output_path} ({len(figures)} pages)")
-    else:
-        output_path.mkdir(parents=True, exist_ok=True)
-        for i, (name, fig) in enumerate(figures):
-            safe_name = name.lower().replace(" ", "_")
-            fig.savefig(output_path / f"{i:02d}_{safe_name}.png", bbox_inches="tight", dpi=150)
-            plt.close(fig)
-        print(f"\nCoverage report saved: {output_path}/ ({len(figures)} images)")
 
 
 def cmd_run(args) -> None:
@@ -476,7 +308,6 @@ def cmd_run(args) -> None:
             missing_data=args.missing_data,
             nan_policy=args.nan_policy,
             price_eur_per_kwh=args.price,
-            plot=args.plot,
         )
     except Exception as e:
         print(f"\nError: {e}")
@@ -491,7 +322,7 @@ def cmd_inspect(args) -> None:
     production_path = Path(args.production) if args.production else None
 
     try:
-        info = inspect_dataset(prosumer_path, production_path, plot=args.plot)
+        info = inspect_dataset(prosumer_path, production_path)
     except ValueError as e:
         print(f"Error: {e}")
         return
@@ -558,7 +389,6 @@ def cmd_inspect(args) -> None:
     else:
         print("  Cannot suggest parameters — no common time overlap across meters.")
 
-    # Coverage plots are handled by inspect_dataset(plot=...) above
 
 
 def cmd_generate(args) -> None:
@@ -607,7 +437,6 @@ def cmd_demo(args) -> None:
         production_path=production_file,
         start=start,
         end=end,
-        plot=args.plot,
     )
 
 
@@ -621,9 +450,6 @@ Examples:
   # Inspect dataset to choose parameters
   python -m cli inspect --prosumers data/prosumers.parquet --production data/production.parquet
 
-  # Inspect with coverage plots
-  python -m cli inspect --prosumers data/prosumers.parquet --plot coverage_report.pdf
-
   # Run full pipeline (dates in DD-MM-YYYY format)
   python -m cli run --prosumers data/prosumers.parquet --production data/production.parquet --start 01-01-2025 --end 07-01-2025
 
@@ -632,7 +458,7 @@ Examples:
 
   # Run complete demo (generate + run)
   python -m cli demo --demo-dir /tmp/demo
-        """,
+""",
     )
 
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
@@ -645,12 +471,6 @@ Examples:
     )
     inspect_parser.add_argument("--prosumers", type=str, help="Path to prosumer data file/folder")
     inspect_parser.add_argument("--production", type=str, help="Path to production data file/folder")
-    inspect_parser.add_argument(
-        "--plot",
-        type=str,
-        default=None,
-        help="Save coverage plots (.pdf or directory for PNGs)",
-    )
     inspect_parser.set_defaults(func=cmd_inspect)
 
     # Run command
@@ -680,12 +500,6 @@ Examples:
         default=0.075,
         help="Fixed local price in EUR/kWh (default: 0.075)",
     )
-    run_parser.add_argument(
-        "--plot",
-        type=str,
-        default=None,
-        help="Save visualization report to path (.pdf for multi-page PDF, directory for PNGs)",
-    )
     run_parser.set_defaults(func=cmd_run)
 
     # Generate command
@@ -699,12 +513,6 @@ Examples:
     # Demo command
     demo_parser = subparsers.add_parser("demo", help="Generate sample data and run full pipeline")
     demo_parser.add_argument("--demo-dir", type=str, default="demo_data", help="Demo output directory")
-    demo_parser.add_argument(
-        "--plot",
-        type=str,
-        default=None,
-        help="Save visualization report to path (.pdf for multi-page PDF, directory for PNGs)",
-    )
     demo_parser.set_defaults(func=cmd_demo)
 
     args = parser.parse_args()
