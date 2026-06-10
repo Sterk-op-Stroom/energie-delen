@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from cli import run_pipeline
 from dashboard.state import AppState
 from dashboard.components.kpi_cards import build_kpi_row
+from dashboard.components.file_upload import resolve_role_path
 
 _MISSING_DATA_HELP = {
     "fill_zero": "Vul gaten op met 0 (standaard — ontbrekende meters behandeld als afwezig)",
@@ -205,9 +206,25 @@ class SimulationPage:
 
     def _on_run(self, _event) -> None:
         s = self._state
-        if not s.prosumer_path and not s.production_path:
+
+        # Re-resolve from the current checkbox selection so the user can change
+        # file combinations between runs without needing to re-inspect first.
+        prosumer_path = resolve_role_path(
+            s.prosumer_files, s.selected_prosumer_indices, "prosumer",
+            fallback=s.prosumer_path,
+        )
+        production_path = resolve_role_path(
+            s.production_files, s.selected_production_indices, "production",
+            fallback=s.production_path,
+        )
+
+        if not prosumer_path and not production_path:
             s.run_status = "error: Geen datapaden ingesteld. Ga eerst naar Data Input."
             return
+
+        # Update state so the simulation page reflects what was actually used
+        s.prosumer_path = prosumer_path
+        s.production_path = production_path
 
         s.run_status = "running"
         s.pipeline = None
@@ -221,8 +238,8 @@ class SimulationPage:
                     result = run_pipeline(
                         start=s.start_date,
                         end=s.end_date,
-                        prosumer_path=s.prosumer_path,
-                        production_path=s.production_path,
+                        prosumer_path=prosumer_path,
+                        production_path=production_path,
                         freq=s.freq,
                         missing_data=s.missing_data,
                         nan_policy=s.nan_policy,

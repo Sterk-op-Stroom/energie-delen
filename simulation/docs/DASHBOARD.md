@@ -54,7 +54,7 @@ You have three options:
 
 | Option | When to use |
 |--------|-------------|
-| **Load Sample Data** | First-time users; generates 5 prosumers + 2 production assets for 7 days |
+| **Laad voorbeelddata** | First-time users; generates 5 prosumers + 2 production assets for 7 days |
 | **Type or paste a file/folder path** | You have Parquet files on disk |
 | **Upload a file** | You want to drag-and-drop a single `.parquet` file from your computer |
 
@@ -64,9 +64,29 @@ Two types of data can be supplied:
 
 See `docs/data_formats.md` for the required Parquet schema to prepare your data.
 
+#### Stacking and combining files
+
+Every upload is remembered — files are not replaced when you upload a new one. Instead each upload is appended to its own per-role list (prosumer files, production files separately).
+
+Click **Geselecteerde bestanden (x/n geselecteerd)** (below the action buttons) to expand the file list. It shows two independent columns:
+
+| Column | Contents |
+|--------|----------|
+| **Prosumers** | All uploaded prosumer files |
+| **Productie-assets** | All uploaded production-asset files |
+
+Each entry has:
+
+| Control | Action |
+|---------|--------|
+| **☑ checkbox** (left) | Include this file in the active selection. Any combination across both columns can be checked simultaneously. |
+| **🗑** (right) | Remove this entry from the list and delete its temp file. |
+
+When **Laad & inspecteer** is clicked (see Step 2), all checked files for each role are merged and loaded together. If only one file is checked per role, it is used directly; if multiple are checked they are combined into a temporary directory that the loader auto-discovers. You can change the selection at any time and re-inspect without losing other uploaded files.
+
 ### Step 2: Load & Inspect
 
-Click **Load & Inspect**. The dashboard will:
+Click **Laad & inspecteer**. The dashboard will:
 
 1. Scan all meters.
 2. Display a table listing every meter: its ID, time range, number of data points, inferred frequency, and percentage of missing values.
@@ -74,22 +94,22 @@ Click **Load & Inspect**. The dashboard will:
 
 | Chart | What it shows |
 |-------|---------------|
-| **Timeline** | How many meters have data at every point in time (stacked area) |
-| **Coverage Heatmap** | Per-meter coverage fraction across time periods (green = full, red = gaps). Switch between Daily / Weekly / Monthly / Quarterly resolution. |
-| **Missing %** | Horizontal bar chart ranking meters by their missing-data fraction |
+| **Tijdlijn** | How many meters have data at every point in time (stacked area) |
+| **Dekkingsheatmap** | Per-meter coverage fraction across time periods (green = full, red = gaps). Switch between **Dagelijks / Wekelijks / Maandelijks / Kwartaal** resolution. |
+| **Ontbrekend %** | Horizontal bar chart ranking meters by their missing-data fraction |
 
-Above the charts you will see the **Inspect Results** summary:
+Above the charts you will see the **Inspectierapport** summary:
 
 | Field | Meaning |
 |-------|---------|
-| Suggested start / end | The longest period where all meters overlap |
-| Suggested frequency | The most common interval detected across meters |
-| Complete period | Number of days in the overlap window |
-| Freq consistent | Whether all meters share the same sampling frequency |
+| Voorgestelde start / Voorgesteld einde | The longest period where all meters overlap |
+| Voorgestelde frequentie | The most common interval detected across meters |
+| Volledige periode | Number of days in the overlap window |
+| Frequentie consistent | Whether all meters share the same sampling frequency (`ja` / `nee ⚠`) |
 
 ### Step 3: Proceed
 
-Click **Next: Simulation Settings →** to move to the next page. The suggested start, end, and frequency are pre-filled in the simulation form automatically. Adjust the settings as desired.
+Click **Volgende: Simulatie-instellingen →** to move to the next page. The suggested start, end, and frequency are pre-filled in the simulation form automatically. Adjust the settings as desired.
 
 ---
 
@@ -126,7 +146,7 @@ Configure and run the pipeline.
 
 ### Running the simulation
 
-Click **Run Simulation**. The **Pipeline log** area shows the output from each pipeline stage (loader → aggregator → allocator → pricing).
+Click **Simulatie starten**. The **Pipeline-logboek** area shows the output from each pipeline stage (loader → aggregator → allocator → pricing).
 
 On success, a row of **KPI cards** appears immediately:
 
@@ -144,7 +164,7 @@ On success, a row of **KPI cards** appears immediately:
 **Cost (EUR)**
 - Community Cost — total charge for locally allocated energy across all prosumers
 
-Click **View Results →** to open the full results explorer.
+Click **Bekijk resultaten →** to open the full results explorer.
 
 ---
 
@@ -152,40 +172,40 @@ Click **View Results →** to open the full results explorer.
 
 The results page has two tabs.
 
-### Tab 1 — Explore
+### Tab 1 — Verkennen
 
 Interactive time-series charts with the option to download them. Two controls apply to all charts:
 
-- **Date range slider** — zoom into any sub-period of the simulation window
-- **Aggregation selector** — view raw 15-min data, or resample to Hourly / Daily / Weekly
+- **Datumbereik** slider — zoom into any sub-period of the simulation window
+- **Aggregatie** selector — view raw data (**Onbewerkt (15 min)**), or resample to **Per uur / Dagelijks / Wekelijks**
 
 Four sub-tabs:
 
-#### Energy Flows
-- **Supply vs Demand** — stacked area chart comparing total community demand (blue) and available local supply (green)
-- **Energy Flows** — stacked area showing locally allocated energy (amber) and grid import (red), with grid export (purple) as a line overlay
+#### Energiestromen
+- **Aanbod vs Vraag (kWh)** — stacked area chart comparing total community demand (blue) and available local supply (green)
+- **Energiestromen (kWh)** — stacked area showing locally allocated energy (amber) and grid import (red), with grid export (purple) as a line overlay
 
-#### Self-Sufficiency & Consumption
-- **Self-Sufficiency Rate** — ratio of local allocation to total demand over time
-- **Self-Consumption Rate** — ratio of local allocation to total supply over time
-- **Per-Prosumer Allocation** — individual meter allocation lines (shown when ≤ 20 prosumers)
+#### Zelfvoorzienendheid & consumptie
+- **Zelfvoorzieningspercentage** — ratio of local allocation to total demand over time
+- **Zelfconsumptiepercentage** — ratio of local allocation to total supply over time
+- **Toewijzing per prosumer** — individual meter allocation lines (shown when ≤ 20 prosumers)
 
-#### Cost
-- **Community Cost** — total EUR cost of locally shared energy over time
-- **Per-Prosumer Cost** — individual meter cost lines (shown when ≤ 20 prosumers)
+#### Kosten
+- **Gemeenschapskosten (EUR)** — total EUR cost of locally shared energy over time
+- **Kosten per prosumer** — individual meter cost lines (shown when ≤ 20 prosumers)
 
-#### Average Profile
+#### Gemiddeld profiel
 Aggregates all timesteps by time-of-day / week / year to reveal structural patterns:
 
 | Profile | X-axis | Use |
 |---------|--------|-----|
-| Daily | Hour of day (0–24) | Morning/evening peaks |
-| Weekly | Day of week (Mon–Sun) | Weekday vs weekend patterns |
-| Yearly | Day of year | Seasonal variation |
+| **Dagelijks** | Hour of day (0–24) | Morning/evening peaks |
+| **Wekelijks** | Day of week (Ma–Zo) | Weekday vs weekend patterns |
+| **Jaarlijks** | Day of year | Seasonal variation |
 
 Each profile shows mean supply (green) and demand (blue) as overlaid area charts.
 
-### Tab 2 — Prosumer Table & Export
+### Tab 2 — Prosumertabel
 
 A paginated table with one row per prosumer, summarising their totals for the simulation period: allocated kWh, grid import, grid export, self-sufficiency rate, and cost in EUR.
 
@@ -193,8 +213,8 @@ Two download buttons:
 
 | Button | File | Contents |
 |--------|------|----------|
-| **Download Prosumer CSV** | `prosumer_summary.csv` | One row per prosumer, aggregated totals |
-| **Download Time Series CSV** | `timeseries.csv` | Full timestep-level data for every prosumer |
+| **Download prosumer-CSV** | `prosumer_summary.csv` | One row per prosumer, aggregated totals |
+| **Download tijdreeks-CSV** | `timeseries.csv` | Full timestep-level data for every prosumer |
 
 ---
 
@@ -202,7 +222,8 @@ Two download buttons:
 
 ```
 Data Input page
-  └─ prosumer_path + production_path
+  └─ prosumer_files[] + production_files[]  (stacked upload history)
+  └─ selected_prosumer_indices + selected_production_indices → prosumer_path + production_path
         ↓  inspect_dataset()
   └─ inspect_result (meter list, coverage, suggested config)
 
@@ -220,8 +241,9 @@ Results page
 
 ## Tips
 
-- **No data yet?** Use **Load Sample Data** on the Data Input page to generate a working dataset instantly.
+- **No data yet?** Use **Laad voorbeelddata** on the Data Input page to generate a working dataset instantly.
 - **Frequency mismatch warning?** The inspect step will flag it. Check that all meter files use the same sampling interval.
 - **No overlap warning?** Your prosumer and production files cover different time windows. Check that their date ranges intersect.
 - **Results button is greyed out?** A simulation has not been run yet on this session. Complete page 2 first.
-- **Re-running with different settings:** Go back to page 2 at any time and click **Run Simulation** again. The results page updates automatically.
+- **Re-running with different settings:** Go back to page 2 at any time and click **Simulatie starten** again. The results page updates automatically.
+- **Testing different data combinations:** Upload multiple prosumer or production files, then use the **Geselecteerde bestanden** panel to check any combination, re-inspect, and run — without re-uploading.

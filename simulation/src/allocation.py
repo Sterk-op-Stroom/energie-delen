@@ -141,11 +141,8 @@ def run_allocation(
         AllocationResult.
 
     Raises:
-        ValueError: If dataset has no prosumers or series lengths don't match step.
+        ValueError: If meter series lengths don't match step.
     """
-    if not dataset.prosumers:
-        raise ValueError("LoadedDataset contains no prosumers.")
-
     n_timesteps = len(step.timestamp)
 
     # Include both prosumers and production assets as potential demanders.

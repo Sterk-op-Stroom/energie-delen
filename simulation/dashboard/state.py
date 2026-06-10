@@ -13,13 +13,29 @@ class AppState(param.Parameterized):
     @pn.depends / .param.watch without polling.
 
     Ownership:
-        DataInputPage  → prosumer_path, production_path, inspect_result
+        DataInputPage  → prosumer_files, production_files,
+                         selected_prosumer_indices, selected_production_indices,
+                         prosumer_path, production_path, inspect_result,
+                         file_sets_version
         SimulationPage → start_date, end_date, freq, missing_data,
                          nan_policy, price_eur_per_kwh, pipeline, run_status
         ResultsPage    → reads pipeline (read-only)
     """
 
-    # --- Data paths (set by DataInputPage) ---
+    # --- Uploaded file stacks (set by DataInputPage) ---
+    # Each entry is a (Path, str) tuple: (temp_path, original_filename).
+    # The two lists are independent; files are selected individually per role.
+    prosumer_files = param.List(default=[], doc="Uploaded prosumer files as (Path, str) tuples")
+    production_files = param.List(default=[], doc="Uploaded production files as (Path, str) tuples")
+
+    # Indices into prosumer_files / production_files that are currently checked.
+    # All checked files are merged and used together when running inspect or simulation.
+    selected_prosumer_indices = param.List(default=[], doc="Checked indices into prosumer_files")
+    selected_production_indices = param.List(default=[], doc="Checked indices into production_files")
+
+    file_sets_version = param.Integer(default=0, doc="Incremented on every file-list change to trigger reactive re-renders")
+
+    # --- Active data paths (set by DataInputPage._on_inspect, read by SimulationPage) ---
     prosumer_path = param.Parameter(default=None, doc="Path to prosumer Parquet file or folder")
     production_path = param.Parameter(default=None, doc="Path to production Parquet file or folder")
     inspect_result = param.Parameter(default=None, doc="InspectResult from cli.inspect_dataset()")

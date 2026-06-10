@@ -1,13 +1,18 @@
 """Data Input page — 3-step progressive flow.
 
 Step 1: Select prosumer and production paths (file upload or text path).
+        Each upload is appended to a per-role list. 'Geselecteerde bestanden'
+        opens two independent checkbox columns — check any combination of
+        prosumer and production files to use them all together.
 Step 2: Show meter lists (after inspect).
 Step 3: Show inspect results and coverage charts.
 """
 
 from __future__ import annotations
 
+import shutil
 import sys
+import tempfile
 import threading
 from pathlib import Path
 
@@ -19,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from cli import inspect_dataset
 from src.sample_data import SampleDataGenerator
-from dashboard.components.file_upload import bytes_to_tempfile
+from dashboard.components.file_upload import bytes_to_tempfile, register_cleanup, resolve_role_path
 from dashboard.state import AppState
 
 
@@ -33,8 +38,6 @@ class DataInputPage:
     # ------------------------------------------------------------------
 
     def _build_widgets(self) -> None:
-        s = self._state
-
         # --- Prosumer input ---
         self._prosumer_path_input = pn.widgets.TextInput(
             name="Prosumer pad (bestand of map)",
@@ -73,6 +76,15 @@ class DataInputPage:
             sizing_mode="stretch_width",
         )
 
+        # --- File set list toggle ---
+        self._file_list_toggle = pn.widgets.Toggle(
+            name=self._file_list_label(),
+            button_type="light",
+            icon="list",
+            value=False,
+            sizing_mode="stretch_width",
+        )
+
         # --- Status ---
         self._status_pane = pn.pane.Markdown("", sizing_mode="stretch_width")
 
@@ -81,6 +93,94 @@ class DataInputPage:
         self._production_upload.param.watch(self._on_production_upload, "value")
         self._sample_btn.on_click(self._on_sample)
         self._inspect_btn.on_click(self._on_inspect)
+        self._state.param.watch(self._sync_file_list_label, "file_sets_version")
+
+    # ------------------------------------------------------------------
+    # File list helpers
+    # ------------------------------------------------------------------
+
+    def _file_list_label(self) -> str:
+        n_p = len(self._state.prosumer_files)
+        n_a = len(self._state.production_files)
+        sel_p = len(self._state.selected_prosumer_indices)
+        sel_a = len(self._state.selected_production_indices)
+        total = n_p + n_a
+        selected = sel_p + sel_a
+        if total == 0:
+            return "Geselecteerde bestanden (0)"
+        return f"Geselecteerde bestanden ({selected}/{total} geselecteerd)"
+
+    def _sync_file_list_label(self, _=None) -> None:
+        self._file_list_toggle.name = self._file_list_label()
+
+    def _build_role_path(self, role: str) -> Path | None:
+        """Resolve the effective path for a role from the checkbox selection.
+
+        If the text input holds a valid absolute or existing path it is used as
+        a manual override. Otherwise delegates to resolve_role_path().
+        """
+        if role == "prosumer":
+            files = self._state.prosumer_files
+            indices = self._state.selected_prosumer_indices
+            text = self._prosumer_path_input.value.strip()
+        else:
+            files = self._state.production_files
+            indices = self._state.selected_production_indices
+            text = self._production_path_input.value.strip()
+
+        # Manual text input takes precedence when it looks like a real path
+        fallback: Path | None = None
+        if text:
+            candidate = Path(text)
+            if candidate.is_absolute() or candidate.exists():
+                fallback = candidate
+
+        return resolve_role_path(files, indices, role, fallback=fallback)
+
+    def _on_toggle_selection(self, role: str, idx: int, checked: bool) -> None:
+        if role == "prosumer":
+            sel = list(self._state.selected_prosumer_indices)
+            if checked and idx not in sel:
+                sel.append(idx)
+            elif not checked and idx in sel:
+                sel.remove(idx)
+            self._state.selected_prosumer_indices = sel
+        else:
+            sel = list(self._state.selected_production_indices)
+            if checked and idx not in sel:
+                sel.append(idx)
+            elif not checked and idx in sel:
+                sel.remove(idx)
+            self._state.selected_production_indices = sel
+        self._state.file_sets_version += 1
+
+    def _on_delete_file(self, role: str, idx: int) -> None:
+        if role == "prosumer":
+            files = list(self._state.prosumer_files)
+            sel = list(self._state.selected_prosumer_indices)
+        else:
+            files = list(self._state.production_files)
+            sel = list(self._state.selected_production_indices)
+
+        if idx < len(files):
+            try:
+                files[idx][0].unlink(missing_ok=True)
+            except OSError:
+                pass
+            files.pop(idx)
+
+        # Remove the deleted index and shift down any higher indices
+        sel = [s for s in sel if s != idx]
+        sel = [s - 1 if s > idx else s for s in sel]
+
+        if role == "prosumer":
+            self._state.prosumer_files = files
+            self._state.selected_prosumer_indices = sel
+        else:
+            self._state.production_files = files
+            self._state.selected_production_indices = sel
+
+        self._state.file_sets_version += 1
 
     # ------------------------------------------------------------------
     # Callbacks
@@ -90,36 +190,65 @@ class DataInputPage:
         if event.new is None:
             return
         p = bytes_to_tempfile(event.new, role="prosumer")
-        self._prosumer_path_input.value = str(p)
-        self._state.prosumer_path = p
+        filename = self._prosumer_upload.filename or ""
+        pf = list(self._state.prosumer_files)
+        pf.append((p, filename))
+        self._state.prosumer_files = pf
+        new_idx = len(pf) - 1
+        sel = list(self._state.selected_prosumer_indices)
+        if new_idx not in sel:
+            sel.append(new_idx)
+        self._state.selected_prosumer_indices = sel
+        self._prosumer_path_input.value = filename
+        self._state.file_sets_version += 1
 
     def _on_production_upload(self, event) -> None:
         if event.new is None:
             return
         p = bytes_to_tempfile(event.new, role="production")
-        self._production_path_input.value = str(p)
-        self._state.production_path = p
+        filename = self._production_upload.filename or ""
+        af = list(self._state.production_files)
+        af.append((p, filename))
+        self._state.production_files = af
+        new_idx = len(af) - 1
+        sel = list(self._state.selected_production_indices)
+        if new_idx not in sel:
+            sel.append(new_idx)
+        self._state.selected_production_indices = sel
+        self._production_path_input.value = filename
+        self._state.file_sets_version += 1
 
     def _on_sample(self, _event) -> None:
-        import tempfile
         self._status_pane.object = "Voorbeelddata genereren…"
         tmpdir = Path(tempfile.mkdtemp(prefix="energie_demo_"))
+        register_cleanup(tmpdir)
         prosumer_path, production_path = SampleDataGenerator.generate_sample_dataset(
             output_dir=tmpdir, num_prosumers=5, num_assets=2, num_days=7
         )
-        self._state.prosumer_path = prosumer_path
-        self._state.production_path = production_path
-        self._prosumer_path_input.value = str(prosumer_path)
-        self._production_path_input.value = str(production_path)
+        pf = list(self._state.prosumer_files)
+        af = list(self._state.production_files)
+        pf.append((prosumer_path, prosumer_path.name))
+        af.append((production_path, production_path.name))
+        self._state.prosumer_files = pf
+        self._state.production_files = af
+        sel_p = list(self._state.selected_prosumer_indices)
+        sel_a = list(self._state.selected_production_indices)
+        new_p = len(pf) - 1
+        new_a = len(af) - 1
+        if new_p not in sel_p:
+            sel_p.append(new_p)
+        if new_a not in sel_a:
+            sel_a.append(new_a)
+        self._state.selected_prosumer_indices = sel_p
+        self._state.selected_production_indices = sel_a
+        self._prosumer_path_input.value = prosumer_path.name
+        self._production_path_input.value = production_path.name
+        self._state.file_sets_version += 1
         self._status_pane.object = f"Voorbeelddata klaar in `{tmpdir}`"
 
     def _on_inspect(self, _event) -> None:
-        # Resolve paths from text inputs (may differ from uploaded temp files)
-        p_str = self._prosumer_path_input.value.strip()
-        a_str = self._production_path_input.value.strip()
-
-        prosumer_path = Path(p_str) if p_str else self._state.prosumer_path
-        production_path = Path(a_str) if a_str else self._state.production_path
+        prosumer_path = self._build_role_path("prosumer")
+        production_path = self._build_role_path("production")
 
         if not prosumer_path and not production_path:
             self._status_pane.object = "⚠ Geef ten minste één datapad op."
@@ -148,6 +277,54 @@ class DataInputPage:
                 self._inspect_btn.disabled = False
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    # ------------------------------------------------------------------
+    # File set list panel
+    # ------------------------------------------------------------------
+
+    def _render_file_list(self) -> pn.viewable.Viewable:
+        pf = self._state.prosumer_files
+        af = self._state.production_files
+        sel_p = set(self._state.selected_prosumer_indices)
+        sel_a = set(self._state.selected_production_indices)
+
+        def _make_column(files, selected_set, role, header):
+            rows = [pn.pane.Markdown(f"**{header}**", margin=(0, 0, 4, 0))]
+            if not files:
+                rows.append(pn.pane.Markdown("_Geen bestanden._", styles={"color": "#9ca3af"}))
+            else:
+                for i, (_path, filename) in enumerate(files):
+                    cb = pn.widgets.Checkbox(
+                        value=(i in selected_set),
+                        width=20,
+                        margin=(6, 6, 0, 2),
+                    )
+                    cb.param.watch(
+                        lambda e, idx=i, r=role: self._on_toggle_selection(r, idx, e.new),
+                        "value",
+                    )
+                    trash_btn = pn.widgets.Button(
+                        name="",
+                        icon="trash",
+                        button_type="light",
+                        width=36,
+                        height=32,
+                        margin=(2, 0, 2, 4),
+                    )
+                    trash_btn.on_click(lambda _, idx=i, r=role: self._on_delete_file(r, idx))
+                    rows.append(pn.Row(
+                        cb,
+                        pn.pane.Markdown(filename, sizing_mode="stretch_width", margin=(6, 4)),
+                        trash_btn,
+                    ))
+            return pn.Column(*rows, sizing_mode="stretch_width")
+
+        return pn.Row(
+            _make_column(pf, sel_p, "prosumer", "Prosumers"),
+            pn.Spacer(width=16),
+            _make_column(af, sel_a, "production", "Productie-assets"),
+            sizing_mode="stretch_width",
+        )
 
     # ------------------------------------------------------------------
     # Reactive panels
@@ -216,7 +393,6 @@ class DataInputPage:
         if result is None:
             return pn.pane.Markdown("")
 
-        # Summary card
         has_complete = result.suggested_start is not None
         if has_complete:
             sug_start = pd.to_datetime(result.suggested_start, dayfirst=True)
@@ -236,11 +412,8 @@ class DataInputPage:
 {no_overlap_warn}
 """
         summary = pn.pane.Markdown(summary_md)
-
-        # Interactive coverage charts in tabs
         coverage_tabs = self._build_coverage_panes(result)
 
-        # Pre-fill simulation settings and navigate
         next_btn = pn.widgets.Button(
             name="Volgende: Simulatie-instellingen →",
             button_type="success",
@@ -262,8 +435,6 @@ class DataInputPage:
         if not result.raw_meters:
             return pn.pane.Markdown("_Geen meterdata beschikbaar._")
 
-        # Build expected index over the full global extent so all data is visible.
-        # Must be tz-aware (UTC) to match meter timestamps.
         expected_index = pd.date_range(
             start=min(m.start for m in result.meters),
             end=max(m.end for m in result.meters),
@@ -274,16 +445,13 @@ class DataInputPage:
         n_meters = len(result.raw_meters)
         chart_height = max(280, n_meters * 40)
 
-        # Reindex each meter once — reused by all three charts
         reindexed = {
             m.meter_id: pd.Series(m.value, index=m.timestamp).reindex(expected_index)
             for m in result.raw_meters
         }
 
-        # --- Chart 1: Coverage Heatmap ---
-        # Build one heatmap per resolution; auto-select a sensible default (~12 columns)
         n_total_days = max(1, (expected_index[-1] - expected_index[0]).days + 1)
-        _HEATMAP_RESOLUTIONS = {}  # label -> pandas resample freq
+        _HEATMAP_RESOLUTIONS = {}
         if n_total_days <= 366:
             _HEATMAP_RESOLUTIONS["Dagelijks"] = "1D"
         if n_total_days >= 14:
@@ -295,7 +463,6 @@ class DataInputPage:
         if not _HEATMAP_RESOLUTIONS:
             _HEATMAP_RESOLUTIONS["Dagelijks"] = "1D"
 
-        # Default resolution: ~12 columns
         if n_total_days <= 14:
             _heatmap_default = "Dagelijks"
         elif n_total_days <= 90:
@@ -344,7 +511,6 @@ class DataInputPage:
             sizing_mode="stretch_width",
         )
 
-        # --- Chart 2: Missing % bars ---
         bars_rows = []
         for m in result.raw_meters:
             vals = reindexed[m.meter_id]
@@ -362,8 +528,6 @@ class DataInputPage:
             sizing_mode="stretch_width",
         )
 
-        # --- Chart 3: Coverage Timeline ---
-        # Use DatetimeIndex as the DataFrame index (more reliable with hvplot.area)
         present_counts = np.zeros(len(expected_index), dtype=int)
         for m in result.raw_meters:
             present_counts += reindexed[m.meter_id].notna().astype(int).values
@@ -372,7 +536,6 @@ class DataInputPage:
             index=expected_index,
         )
         timeline_df.index.name = "timestamp"
-        # Downsample to hourly so Bokeh doesn't choke on 15-min points
         timeline_df = timeline_df.resample("1h").mean()
         timeline_pane = pn.pane.HoloViews(
             timeline_df.hvplot.area(
@@ -386,8 +549,6 @@ class DataInputPage:
             sizing_mode="stretch_width",
         )
 
-        # RadioButtonGroup acts as the tab bar — more reliable than pn.Tabs
-        # inside a reactive pn.bind context; Timeline shown first
         _CHART_OPTIONS = ["Tijdlijn", "Dekkingsheatmap", "Ontbrekend %"]
         _CHART_MAP = {
             "Dekkingsheatmap": heatmap_pane,
@@ -420,9 +581,14 @@ class DataInputPage:
     # ------------------------------------------------------------------
 
     def panel(self) -> pn.viewable.Viewable:
+        file_list_area = pn.bind(
+            lambda toggle_val, _ver: self._render_file_list() if toggle_val else pn.pane.Markdown(""),
+            self._file_list_toggle,
+            self._state.param.file_sets_version,
+        )
+
         return pn.Column(
             pn.pane.Markdown("# Gegevensinvoer"),
-            # Step 1: path selection
             pn.pane.Markdown("## Stap 1: Selecteer uw gegevens"),
             pn.Row(
                 pn.Column(
@@ -437,12 +603,12 @@ class DataInputPage:
                 ),
             ),
             pn.Row(self._sample_btn, self._inspect_btn),
+            self._file_list_toggle,
+            file_list_area,
             self._status_pane,
             pn.layout.Divider(),
-            # Step 2: meter lists (reactive)
             pn.bind(lambda _: self._meter_lists(), self._state.param.inspect_status),
             pn.layout.Divider(),
-            # Step 3: inspect results (reactive)
             pn.bind(lambda _: self._inspect_results(), self._state.param.inspect_status),
             sizing_mode="stretch_width",
         )
