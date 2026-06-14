@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.core_types import AggregatedStep, AllocationResult, PricingResult
+    from typing import Optional
 
 
 def make_supply_demand_df(step: AggregatedStep) -> pd.DataFrame:
@@ -77,7 +78,7 @@ def make_community_cost_df(pricing: PricingResult) -> pd.DataFrame:
 
     Returns columns: timestamp, cost_eur, cumulative_cost_eur
     """
-    cost = pricing.total_local_cost_eur.astype(float)
+    cost = pricing.total_cost_eur.astype(float)
     return pd.DataFrame(
         {
             "timestamp": pricing.timestamp,
@@ -98,7 +99,7 @@ def make_prosumer_timeseries_df(
     rows = []
     for pid in allocation.prosumer_ids:
         alloc = allocation.allocations[pid].astype(float)
-        cost = pricing.local_cost_eur[pid].astype(float)
+        cost = pricing.cost_eur[pid].astype(float)
         n = len(alloc)
         rows.append(
             pd.DataFrame(
@@ -111,6 +112,56 @@ def make_prosumer_timeseries_df(
             )
         )
     return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
+
+
+def make_market_cost_df(
+    pricing_import: "PricingResult | None",
+    pricing_export: "PricingResult | None",
+) -> pd.DataFrame:
+    """Community-level market costs per timestep.
+
+    Returns columns: timestamp, and a subset of:
+      import_cost_eur, export_revenue_eur, net_cost_eur
+    depending on which pricing objects are provided.
+    """
+    if pricing_import is None and pricing_export is None:
+        return pd.DataFrame()
+    ref = pricing_import if pricing_import is not None else pricing_export
+    data: dict = {"timestamp": ref.timestamp}
+    if pricing_import is not None:
+        data["import_cost_eur"] = pricing_import.total_cost_eur.astype(float)
+    if pricing_export is not None:
+        data["export_revenue_eur"] = pricing_export.total_cost_eur.astype(float)
+    if pricing_import is not None and pricing_export is not None:
+        data["net_cost_eur"] = (
+            pricing_import.total_cost_eur - pricing_export.total_cost_eur
+        ).astype(float)
+    return pd.DataFrame(data)
+
+
+def make_counterfactual_cost_df(
+    pricing_import: "PricingResult | None",
+    pricing_export: "PricingResult | None",
+) -> pd.DataFrame:
+    """Community-level counterfactual costs per timestep (as-if no local sharing).
+
+    Returns columns: timestamp, and a subset of:
+      import_cost_eur, export_revenue_eur, net_cost_eur
+    depending on which pricing objects are provided.
+    """
+    if pricing_import is None and pricing_export is None:
+        return pd.DataFrame()
+    ref = pricing_import if pricing_import is not None else pricing_export
+    data: dict = {"timestamp": ref.timestamp}
+    if pricing_import is not None:
+        data["import_cost_eur"] = pricing_import.total_cost_eur.astype(float)
+    if pricing_export is not None:
+        data["export_revenue_eur"] = pricing_export.total_cost_eur.astype(float)
+    if pricing_import is not None and pricing_export is not None:
+        data["net_cost_eur"] = (
+            pricing_import.total_cost_eur - pricing_export.total_cost_eur
+        ).astype(float)
+    return pd.DataFrame(data)
 
 
 def available_profiles(step: AggregatedStep) -> list[str]:

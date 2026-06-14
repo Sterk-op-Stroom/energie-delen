@@ -123,10 +123,16 @@ Configure and run the pipeline.
 |-----------|-------------|---------|
 | **Start date** | Simulation window start (DD-MM-YYYY) | From inspect |
 | **End date** | Simulation window end (DD-MM-YYYY) | From inspect |
+| **Pricing model (local sharing)** | Strategy for pricing locally shared energy. Currently only **Vaste prijs** (fixed price) is available. | `Vaste prijs` |
+| **Local price (EUR/kWh)** | Fixed price charged per kWh of locally allocated energy | `0.075` |
+| **Market pricing model** | Optional pricing for residual grid flows. Select **Geen** to skip, **Vaste prijs** to set fixed import/export prices. | `Geen` |
+| **Market import price (EUR/kWh)** | Price paid per kWh drawn from the grid after local sharing (visible when market pricing is active) | `0.25` |
+| **Export compensation price (EUR/kWh)** | Revenue received per kWh exported to the grid after local sharing (visible when market pricing is active) | `0.09` |
 | **Frequency** | Timestep resolution — enter a number and choose `min` or `sec` (e.g. 15 min, 30 sec). Toggle **Automatisch detecteren** to use the frequency inferred from the data. | From inspect |
 | **Missing data policy** | How to handle gaps in meter data | `fill_zero` |
 | **NaN policy** | How NaN values behave during aggregation | `treat_as_zero` |
-| **Local price (EUR/kWh)** | Fixed price charged for locally shared energy | `0.075` |
+
+The **Frequency**, **Missing data policy**, and **NaN policy** fields are hidden inside the collapsed **Geavanceerde instellingen** card. Click it to expand.
 
 #### Missing data policy options
 
@@ -164,6 +170,11 @@ On success, a row of **KPI cards** appears immediately:
 **Cost (EUR)**
 - Community Cost — total charge for locally allocated energy across all prosumers
 
+**Market Cost (EUR)** — shown only when **Prijsmodel markt** is configured
+- Market Import Cost — total grid import charges after local sharing
+- Market Export Revenue — total grid export revenues after local sharing
+- Net Market Cost — import cost minus export revenue
+
 Click **Bekijk resultaten →** to open the full results explorer.
 
 ---
@@ -191,8 +202,10 @@ Four sub-tabs:
 - **Toewijzing per prosumer** — individual meter allocation lines (shown when ≤ 20 prosumers)
 
 #### Kosten
-- **Gemeenschapskosten (EUR)** — total EUR cost of locally shared energy over time
-- **Kosten per prosumer** — individual meter cost lines (shown when ≤ 20 prosumers)
+- **Gemeenschapskosten lokaal delen (EUR)** — total EUR cost of locally shared energy over time
+- **Kosten lokaal delen per prosumer** — individual meter cost lines (shown when ≤ 20 prosumers)
+- **Marktkosten: import & export (EUR)** — area chart of grid import costs (red) and export revenues (green) per timestep (shown when market pricing is configured)
+- **Netto marktkosten (EUR)** — net market cost per timestep: import cost minus export revenue (shown when both market import and export prices are configured)
 
 #### Gemiddeld profiel
 Aggregates all timesteps by time-of-day / week / year to reveal structural patterns:
@@ -207,7 +220,7 @@ Each profile shows mean supply (green) and demand (blue) as overlaid area charts
 
 ### Tab 2 — Prosumertabel
 
-A paginated table with one row per prosumer, summarising their totals for the simulation period: allocated kWh, grid import, grid export, self-sufficiency rate, and cost in EUR.
+A paginated table with one row per prosumer, summarising their totals for the simulation period: allocated kWh, grid import, self-sufficiency rate, and local sharing cost in EUR. When **Prijsmodel markt** is configured, three additional columns appear: market import cost, market export revenue, and net market cost per prosumer.
 
 Two download buttons:
 
@@ -228,9 +241,13 @@ Data Input page
   └─ inspect_result (meter list, coverage, suggested config)
 
 Simulation page
-  └─ SimulationConfig (start, end, freq, missing_data, nan_policy, price)
+  └─ pricing settings (local price, optional market import/export prices)
+  └─ SimulationConfig (start, end, freq, missing_data, nan_policy)
         ↓  run_pipeline()
-  └─ PipelineResult (dataset → step → allocation → pricing)
+  └─ PipelineResult
+       ├─ dataset → step → allocation → pricing  (local sharing)
+       ├─ pricing_market_import  (optional — grid import costs)
+       └─ pricing_market_export  (optional — grid export revenues)
 
 Results page
   └─ reads PipelineResult (read-only)

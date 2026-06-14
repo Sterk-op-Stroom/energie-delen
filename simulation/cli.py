@@ -18,6 +18,13 @@ from src.core_types import (
     PricingResult,
     SimulationConfig,
 )
+from src.flows import (
+    counterfactual_export_flow,
+    counterfactual_import_flow,
+    local_sharing_flow,
+    residual_export_flow,
+    residual_import_flow,
+)
 from src.loader import DatasetLoader, MeterLoader
 from src.pricing import FixedPricePricing, run_pricing
 from src.report_types import InspectResult, MeterInfo
@@ -31,6 +38,10 @@ class PipelineResult(NamedTuple):
     allocation: AllocationResult
     pricing: PricingResult
     config: SimulationConfig
+    pricing_market_import: PricingResult | None = None
+    pricing_market_export: PricingResult | None = None
+    pricing_counterfactual_import: PricingResult | None = None
+    pricing_counterfactual_export: PricingResult | None = None
 
     def __str__(self) -> str:
         lines = [
@@ -40,6 +51,14 @@ class PipelineResult(NamedTuple):
             self.allocation.summary(),
             self.pricing.summary(),
         ]
+        if self.pricing_market_import is not None:
+            lines.append(self.pricing_market_import.summary())
+        if self.pricing_market_export is not None:
+            lines.append(self.pricing_market_export.summary())
+        if self.pricing_counterfactual_import is not None:
+            lines.append(self.pricing_counterfactual_import.summary())
+        if self.pricing_counterfactual_export is not None:
+            lines.append(self.pricing_counterfactual_export.summary())
         return "\n".join(lines)
 
 
@@ -61,6 +80,10 @@ def run_pipeline(
     missing_data: str = "fill_zero",
     nan_policy: str = "treat_as_zero",
     price_eur_per_kwh: float = 0.075,
+    market_price_import_eur_per_kwh: float | None = None,
+    market_price_export_eur_per_kwh: float | None = None,
+    counterfactual_price_import_eur_per_kwh: float | None = None,
+    counterfactual_price_export_eur_per_kwh: float | None = None,
 ) -> PipelineResult:
     """Run the full simulation pipeline: load → aggregate → allocate → price."""
     if not prosumer_path and not production_path:
@@ -108,27 +131,74 @@ def run_pipeline(
     print(f"  Grid import:       {allocation.grid_import.sum():.2f} kWh")
     print(f"  Grid export:       {allocation.grid_export.sum():.2f} kWh")
 
-    # --- Price ---
+    # --- Price local sharing ---
     print(f"\n[4/4] Pricing at {price_eur_per_kwh:.4f} EUR/kWh...")
-    result = run_pricing(allocation, FixedPricePricing(price_eur_per_kwh))
+    flow = local_sharing_flow(allocation)
+    result = run_pricing(flow, FixedPricePricing(price_eur_per_kwh))
 
-    community_total = float(result.total_local_cost_eur.sum())
-    total_kwh = sum(result.local_kwh_priced[m].sum() for m in result.prosumer_ids)
+    community_total = float(result.total_cost_eur.sum())
+    total_kwh = sum(result.kwh_priced[m].sum() for m in result.prosumer_ids)
     print(f"  Community local charge: {community_total:.2f} EUR")
     print(f"  Total kWh priced:      {total_kwh:.2f} kWh")
 
     # --- Per-prosumer summary ---
     print("\nPer-prosumer summary:")
     for pid in result.prosumer_ids[:5]:
-        kwh = result.local_kwh_priced[pid].sum()
-        eur = result.total_local_cost_eur_by_prosumer[pid]
+        kwh = result.kwh_priced[pid].sum()
+        eur = result.total_cost_eur_by_prosumer[pid]
         print(f"  {pid}: {kwh:.2f} kWh -> {eur:.2f} EUR")
     if len(result.prosumer_ids) > 5:
         print(f"  ... and {len(result.prosumer_ids) - 5} more")
 
+    # --- Market pricing (residual grid flows) ---
+    pricing_market_import = None
+    pricing_market_export = None
+
+    if market_price_import_eur_per_kwh is not None or market_price_export_eur_per_kwh is not None:
+        print("\n[4b] Pricing market (grid) flows...")
+
+    if market_price_import_eur_per_kwh is not None:
+        import_flow = residual_import_flow(allocation)
+        pricing_market_import = run_pricing(
+            import_flow, FixedPricePricing(market_price_import_eur_per_kwh)
+        )
+        print(f"  Grid import charge:    {float(pricing_market_import.total_cost_eur.sum()):.2f} EUR")
+
+    if market_price_export_eur_per_kwh is not None:
+        export_flow = residual_export_flow(allocation, dataset, step)
+        pricing_market_export = run_pricing(
+            export_flow, FixedPricePricing(market_price_export_eur_per_kwh)
+        )
+        print(f"  Grid export revenue:   {float(pricing_market_export.total_cost_eur.sum()):.2f} EUR")
+
+    # --- Counterfactual pricing (as-if no local sharing) ---
+    pricing_counterfactual_import = None
+    pricing_counterfactual_export = None
+
+    if counterfactual_price_import_eur_per_kwh is not None or counterfactual_price_export_eur_per_kwh is not None:
+        print("\n[4c] Pricing counterfactual (normale energieleverancier)...")
+
+    if counterfactual_price_import_eur_per_kwh is not None:
+        cf_import_flow = counterfactual_import_flow(allocation, dataset)
+        pricing_counterfactual_import = run_pricing(
+            cf_import_flow, FixedPricePricing(counterfactual_price_import_eur_per_kwh)
+        )
+        print(f"  Counterfactual import: {float(pricing_counterfactual_import.total_cost_eur.sum()):.2f} EUR")
+
+    if counterfactual_price_export_eur_per_kwh is not None:
+        cf_export_flow = counterfactual_export_flow(allocation, dataset)
+        pricing_counterfactual_export = run_pricing(
+            cf_export_flow, FixedPricePricing(counterfactual_price_export_eur_per_kwh)
+        )
+        print(f"  Counterfactual export: {float(pricing_counterfactual_export.total_cost_eur.sum()):.2f} EUR")
+
     print("\nDone.")
 
-    return PipelineResult(dataset, step, allocation, result, simulation_config)
+    return PipelineResult(
+        dataset, step, allocation, result, simulation_config,
+        pricing_market_import, pricing_market_export,
+        pricing_counterfactual_import, pricing_counterfactual_export,
+    )
 
 
 def _find_longest_complete_period(

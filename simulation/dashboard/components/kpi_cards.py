@@ -19,11 +19,15 @@ def build_kpi_row(pipeline: PipelineResult) -> pn.Column:
     total_demand = float(step.demand_total.sum())
     total_supply = float(step.supply_total.sum())
     total_allocated = sum(alloc.allocations[m].sum() for m in alloc.prosumer_ids)
-    total_cost = float(pricing.total_local_cost_eur.sum())
+    total_cost = float(pricing.total_cost_eur.sum())
     self_suff = total_allocated / total_demand if total_demand > 0 else 0.0
     self_cons = total_allocated / total_supply if total_supply > 0 else 0.0
     grid_import = float(alloc.grid_import.sum())
     grid_export = float(alloc.grid_export.sum())
+    market_import = pipeline.pricing_market_import
+    market_export = pipeline.pricing_market_export
+    cf_import = pipeline.pricing_counterfactual_import
+    cf_export = pipeline.pricing_counterfactual_export
 
     def _card(title: str, value: str, unit: str = "", description: str = "") -> pn.Column:
         children = [
@@ -90,14 +94,64 @@ def build_kpi_row(pipeline: PipelineResult) -> pn.Column:
         sizing_mode="stretch_width",
     )
 
+    eur_cards = [
+        _card("Bedrag gedeelde energie", f"{total_cost:,.2f}", "EUR",
+              "Bedrag aan lokaal gedeelde energie"),
+    ]
+    if market_import is not None:
+        import_cost = float(market_import.total_cost_eur.sum())
+        eur_cards.append(_card(
+            "Marktkosten import", f"{import_cost:,.2f}", "EUR",
+            "Totale kosten voor netimport na lokaal delen",
+        ))
+    if market_export is not None:
+        export_rev = float(market_export.total_cost_eur.sum())
+        eur_cards.append(_card(
+            "Marktopbrengsten export", f"{export_rev:,.2f}", "EUR",
+            "Totale opbrengsten voor netexport na lokaal delen",
+        ))
+    if market_import is not None and market_export is not None:
+        net = float(market_import.total_cost_eur.sum()) - float(market_export.total_cost_eur.sum())
+        eur_cards.append(_card(
+            "Netto marktkosten", f"{net:,.2f}", "EUR",
+            "Marktkosten import minus marktopbrengsten export",
+        ))
+
     eur_row = pn.Column(
         pn.pane.Markdown("Kosten (EUR)", styles=row_label_style, margin=(8, 0, 4, 0)),
-        pn.Row(
-            _card("Gemeenschapskosten", f"{total_cost:,.2f}", "EUR",
-                  "Totale kosten voor lokaal toegewezen energie voor alle prosumers"),
-            sizing_mode="stretch_width",
-        ),
+        pn.Row(*eur_cards, sizing_mode="stretch_width"),
         sizing_mode="stretch_width",
     )
 
-    return pn.Column(kwh_row, pct_row, eur_row, sizing_mode="stretch_width")
+    rows = [kwh_row, pct_row, eur_row]
+
+    if cf_import is not None or cf_export is not None:
+        cf_import_cost = float(cf_import.total_cost_eur.sum()) if cf_import is not None else 0.0
+        cf_export_rev = float(cf_export.total_cost_eur.sum()) if cf_export is not None else 0.0
+        cf_cards = []
+        if cf_import is not None:
+            cf_cards.append(_card(
+                "Marktkosten import", f"{cf_import_cost:,.2f}", "EUR",
+                "Wat prosumers zouden betalen zonder lokaal energiedelen",
+            ))
+        if cf_export is not None:
+            cf_cards.append(_card(
+                "Marktopbrengsten export", f"{cf_export_rev:,.2f}", "EUR",
+                "Wat producenten zouden ontvangen zonder lokaal energiedelen",
+            ))
+        if cf_import is not None and cf_export is not None:
+            cf_net = cf_import_cost - cf_export_rev
+            cf_cards.append(_card(
+                "Netto zonder deling", f"{cf_net:,.2f}", "EUR",
+                "Netto energiekosten zonder lokaal energiedelen",
+            ))
+        rows.append(pn.Column(
+            pn.pane.Markdown(
+                "Vergelijking met kosten bij normale energieleverancier (EUR)",
+                styles=row_label_style, margin=(8, 0, 4, 0),
+            ),
+            pn.Row(*cf_cards, sizing_mode="stretch_width"),
+            sizing_mode="stretch_width",
+        ))
+
+    return pn.Column(*rows, sizing_mode="stretch_width")

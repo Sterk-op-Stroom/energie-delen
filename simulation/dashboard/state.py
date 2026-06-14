@@ -18,7 +18,13 @@ class AppState(param.Parameterized):
                          prosumer_path, production_path, inspect_result,
                          file_sets_version
         SimulationPage → start_date, end_date, freq, missing_data,
-                         nan_policy, price_eur_per_kwh, pipeline, run_status
+                         nan_policy, pricing_model, price_eur_per_kwh,
+                         market_pricing_model, market_price_import_eur_per_kwh,
+                         market_price_export_eur_per_kwh,
+                         counterfactual_pricing_model,
+                         counterfactual_price_import_eur_per_kwh,
+                         counterfactual_price_export_eur_per_kwh,
+                         pipeline, run_status
         ResultsPage    → reads pipeline (read-only)
     """
 
@@ -54,7 +60,26 @@ class AppState(param.Parameterized):
         default="treat_as_zero",
         objects=["treat_as_zero", "propagate"],
     )
+    pricing_model = param.Selector(
+        default="fixed_price",
+        objects=["fixed_price"],
+        doc="Pricing strategy for locally shared energy",
+    )
     price_eur_per_kwh = param.Number(default=0.075, doc="Fixed local price in EUR/kWh")
+    market_pricing_model = param.Selector(
+        default="none",
+        objects=["none", "fixed_price"],
+        doc="Pricing strategy for market (grid) flows",
+    )
+    market_price_import_eur_per_kwh = param.Number(default=0.25, doc="Market import price in EUR/kWh")
+    market_price_export_eur_per_kwh = param.Number(default=0.09, doc="Feed-in tariff in EUR/kWh")
+    counterfactual_pricing_model = param.Selector(
+        default="none",
+        objects=["none", "fixed_price"],
+        doc="Pricing strategy for counterfactual (no local sharing) flows",
+    )
+    counterfactual_price_import_eur_per_kwh = param.Number(default=0.25, doc="Counterfactual import price in EUR/kWh")
+    counterfactual_price_export_eur_per_kwh = param.Number(default=0.09, doc="Counterfactual feed-in tariff in EUR/kWh")
 
     # --- Pipeline output (set after a successful run) ---
     pipeline = param.Parameter(default=None, doc="PipelineResult | None")

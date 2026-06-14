@@ -274,6 +274,11 @@ class EqualAllocation(AllocationModel):
             for i, meter_id in enumerate(prosumer_ids)
         }
 
+        residual_demand = {
+            meter_id: remaining_demand[i].copy()
+            for i, meter_id in enumerate(prosumer_ids)
+        }
+
         logger.info(
             "Allocation complete: avg allocated/step=%.3f kWh, "
             "avg grid_import=%.3f kWh, avg grid_export=%.3f kWh",
@@ -290,6 +295,7 @@ class EqualAllocation(AllocationModel):
             allocations=allocations,
             grid_import=grid_import,
             grid_export=grid_export,
+            residual_demand=residual_demand,
             strategy=self.name,
             unit="kWh",
             freq=freq,

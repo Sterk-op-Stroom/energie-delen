@@ -22,6 +22,23 @@ from dashboard.state import AppState
 from dashboard.components.kpi_cards import build_kpi_row
 from dashboard.components.file_upload import resolve_role_path
 
+_PRICING_MODEL_LABELS: dict[str, str] = {
+    "Vaste prijs": "fixed_price",
+}
+_PRICING_MODEL_LABELS_INV = {v: k for k, v in _PRICING_MODEL_LABELS.items()}
+
+_MARKET_MODEL_LABELS: dict[str, str] = {
+    "Geen": "none",
+    "Vaste prijs": "fixed_price",
+}
+_MARKET_MODEL_LABELS_INV = {v: k for k, v in _MARKET_MODEL_LABELS.items()}
+
+_COUNTERFACTUAL_MODEL_LABELS: dict[str, str] = {
+    "Geen": "none",
+    "Vaste prijs": "fixed_price",
+}
+_COUNTERFACTUAL_MODEL_LABELS_INV = {v: k for k, v in _COUNTERFACTUAL_MODEL_LABELS.items()}
+
 _MISSING_DATA_HELP = {
     "fill_zero": "Vul gaten op met 0 (standaard — ontbrekende meters behandeld als afwezig)",
     "fill_forward": "Vul gaten op vanuit de laatste bekende waarde",
@@ -92,9 +109,51 @@ class SimulationPage:
             value=s.nan_policy,
             sizing_mode="stretch_width",
         )
+        self._pricing_model_select = pn.widgets.Select(
+            name="Prijsmodel lokaal delen",
+            options=_PRICING_MODEL_LABELS,
+            value=s.pricing_model,
+            sizing_mode="stretch_width",
+        )
         self._price_input = pn.widgets.FloatInput(
             name="Lokale prijs (EUR / kWh)",
             value=s.price_eur_per_kwh,
+            step=0.005,
+            sizing_mode="stretch_width",
+        )
+        self._market_pricing_model_select = pn.widgets.Select(
+            name="Prijsmodel markt",
+            options=_MARKET_MODEL_LABELS,
+            value=s.market_pricing_model,
+            sizing_mode="stretch_width",
+        )
+        self._market_import_price_input = pn.widgets.FloatInput(
+            name="Prijs levering (EUR / kWh)",
+            value=s.market_price_import_eur_per_kwh,
+            step=0.005,
+            sizing_mode="stretch_width",
+        )
+        self._market_export_price_input = pn.widgets.FloatInput(
+            name="Prijs teruglevering (EUR / kWh)",
+            value=s.market_price_export_eur_per_kwh,
+            step=0.005,
+            sizing_mode="stretch_width",
+        )
+        self._counterfactual_pricing_model_select = pn.widgets.Select(
+            name="Prijsmodel energieleverancier (vergelijking)",
+            options=_COUNTERFACTUAL_MODEL_LABELS,
+            value=s.counterfactual_pricing_model,
+            sizing_mode="stretch_width",
+        )
+        self._counterfactual_import_price_input = pn.widgets.FloatInput(
+            name="Prijs levering (EUR / kWh)",
+            value=s.counterfactual_price_import_eur_per_kwh,
+            step=0.005,
+            sizing_mode="stretch_width",
+        )
+        self._counterfactual_export_price_input = pn.widgets.FloatInput(
+            name="Prijs teruglevering (EUR / kWh)",
+            value=s.counterfactual_price_export_eur_per_kwh,
             step=0.005,
             sizing_mode="stretch_width",
         )
@@ -120,7 +179,28 @@ class SimulationPage:
         self._freq_unit.param.watch(self._on_freq_widget_change, "value")
         self._missing_select.param.watch(lambda e: setattr(s, "missing_data", e.new), "value")
         self._nan_select.param.watch(lambda e: setattr(s, "nan_policy", e.new), "value")
+        self._pricing_model_select.param.watch(
+            lambda e: setattr(s, "pricing_model", e.new), "value"
+        )
         self._price_input.param.watch(lambda e: setattr(s, "price_eur_per_kwh", e.new), "value")
+        self._market_pricing_model_select.param.watch(
+            lambda e: setattr(s, "market_pricing_model", e.new), "value"
+        )
+        self._market_import_price_input.param.watch(
+            lambda e: setattr(s, "market_price_import_eur_per_kwh", e.new), "value"
+        )
+        self._market_export_price_input.param.watch(
+            lambda e: setattr(s, "market_price_export_eur_per_kwh", e.new), "value"
+        )
+        self._counterfactual_pricing_model_select.param.watch(
+            lambda e: setattr(s, "counterfactual_pricing_model", e.new), "value"
+        )
+        self._counterfactual_import_price_input.param.watch(
+            lambda e: setattr(s, "counterfactual_price_import_eur_per_kwh", e.new), "value"
+        )
+        self._counterfactual_export_price_input.param.watch(
+            lambda e: setattr(s, "counterfactual_price_export_eur_per_kwh", e.new), "value"
+        )
 
         # Pre-fill date/freq widgets whenever a new inspect result arrives
         s.param.watch(self._on_inspect_result, "inspect_result")
@@ -204,6 +284,29 @@ class SimulationPage:
                     return min(n, 999), 'sec'
         return 15, 'min'
 
+    def _price_model_params(self, model: str) -> pn.viewable.Viewable:
+        if model == "fixed_price":
+            return self._price_input
+        return pn.pane.Markdown("")
+
+    def _market_model_params(self, model: str) -> pn.viewable.Viewable:
+        if model == "fixed_price":
+            return pn.Column(
+                self._market_import_price_input,
+                self._market_export_price_input,
+                sizing_mode="stretch_width",
+            )
+        return pn.pane.Markdown("")
+
+    def _counterfactual_model_params(self, model: str) -> pn.viewable.Viewable:
+        if model == "fixed_price":
+            return pn.Column(
+                self._counterfactual_import_price_input,
+                self._counterfactual_export_price_input,
+                sizing_mode="stretch_width",
+            )
+        return pn.pane.Markdown("")
+
     def _on_run(self, _event) -> None:
         s = self._state
 
@@ -235,6 +338,22 @@ class SimulationPage:
             buf = io.StringIO()
             try:
                 with contextlib.redirect_stdout(buf):
+                    market_import = (
+                        s.market_price_import_eur_per_kwh
+                        if s.market_pricing_model == "fixed_price" else None
+                    )
+                    market_export = (
+                        s.market_price_export_eur_per_kwh
+                        if s.market_pricing_model == "fixed_price" else None
+                    )
+                    cf_import = (
+                        s.counterfactual_price_import_eur_per_kwh
+                        if s.counterfactual_pricing_model == "fixed_price" else None
+                    )
+                    cf_export = (
+                        s.counterfactual_price_export_eur_per_kwh
+                        if s.counterfactual_pricing_model == "fixed_price" else None
+                    )
                     result = run_pipeline(
                         start=s.start_date,
                         end=s.end_date,
@@ -244,6 +363,10 @@ class SimulationPage:
                         missing_data=s.missing_data,
                         nan_policy=s.nan_policy,
                         price_eur_per_kwh=s.price_eur_per_kwh,
+                        market_price_import_eur_per_kwh=market_import,
+                        market_price_export_eur_per_kwh=market_export,
+                        counterfactual_price_import_eur_per_kwh=cf_import,
+                        counterfactual_price_export_eur_per_kwh=cf_export,
                     )
                 s.pipeline = result
                 s.run_status = "done"
@@ -284,42 +407,68 @@ class SimulationPage:
         return pn.pane.Markdown("")
 
     def panel(self) -> pn.viewable.Viewable:
+        advanced = pn.Card(
+            pn.Column(
+                pn.pane.Markdown("**Frequentie**", margin=(8, 0, 2, 0)),
+                pn.Row(
+                    self._freq_number,
+                    self._freq_unit,
+                    pn.Column(
+                        pn.Spacer(height=22),
+                        self._freq_infer_toggle,
+                        margin=(0, 0, 0, 0),
+                    ),
+                    align="end",
+                ),
+                self._freq_hint,
+                self._missing_select,
+                pn.pane.Markdown(
+                    "\n".join(f"- **{k}**: {v}" for k, v in _MISSING_DATA_HELP.items()),
+                    styles={"font-size": "0.85em", "color": "#6b7280"},
+                ),
+                pn.pane.Markdown("**NaN-beleid** (aggregatiefase)", margin=(8, 0, 2, 0)),
+                self._nan_select,
+                pn.pane.Markdown(
+                    "\n".join(f"- **{k}**: {v}" for k, v in _NAN_POLICY_HELP.items()),
+                    styles={"font-size": "0.85em", "color": "#6b7280"},
+                ),
+                sizing_mode="stretch_width",
+            ),
+            title="Geavanceerde instellingen",
+            collapsed=True,
+            sizing_mode="stretch_width",
+        )
         return pn.Column(
             pn.pane.Markdown("# Simulatie-instellingen"),
             pn.Row(
+                self._start_input,
+                self._end_input
+            ),
+            self._pricing_model_select,
+            pn.bind(self._price_model_params, self._state.param.pricing_model),
+            pn.Row(
                 pn.Column(
-                    self._start_input,
-                    self._end_input,
-                    pn.pane.Markdown("**Frequentie**", margin=(8, 0, 2, 0)),
-                    pn.Row(
-                        self._freq_number,
-                        self._freq_unit,
-                        pn.Column(
-                            pn.Spacer(height=22),
-                            self._freq_infer_toggle,
-                            margin=(0, 0, 0, 0),
-                        ),
-                        align="end",
-                    ),
-                    self._freq_hint,
+                    self._market_pricing_model_select,
+                    pn.bind(self._market_model_params, self._state.param.market_pricing_model),
+                    styles={
+                        "border": "1px dashed #d1d5db",
+                        "border-radius": "6px",
+                        "padding": "10px 12px",
+                    },
                     sizing_mode="stretch_width",
                 ),
                 pn.Column(
-                    self._missing_select,
-                    pn.pane.Markdown(
-                        "\n".join(f"- **{k}**: {v}" for k, v in _MISSING_DATA_HELP.items()),
-                        styles={"font-size": "0.85em", "color": "#6b7280"},
-                    ),
+                    self._counterfactual_pricing_model_select,
+                    pn.bind(self._counterfactual_model_params, self._state.param.counterfactual_pricing_model),
+                    styles={
+                        "border": "1px dashed #d1d5db",
+                        "border-radius": "6px",
+                        "padding": "10px 12px",
+                    },
                     sizing_mode="stretch_width",
                 ),
             ),
-            pn.pane.Markdown("**NaN-beleid** (aggregatiefase)"),
-            self._nan_select,
-            pn.pane.Markdown(
-                "\n".join(f"- **{k}**: {v}" for k, v in _NAN_POLICY_HELP.items()),
-                styles={"font-size": "0.85em", "color": "#6b7280"},
-            ),
-            self._price_input,
+            advanced,
             pn.layout.Divider(),
             self._run_btn,
             pn.pane.Markdown("**Pipeline-logboek**", margin=(8, 0, 2, 0)),

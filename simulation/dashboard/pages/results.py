@@ -18,6 +18,7 @@ from dashboard.transforms import (
     make_avg_profile_df,
     make_community_cost_df,
     make_efficiency_df,
+    make_market_cost_df,
     make_prosumer_timeseries_df,
     make_supply_demand_df,
     resample_df,
@@ -78,6 +79,10 @@ class ResultsPage:
         alloc_df = make_allocation_df(pipeline.allocation)
         eff_df = make_efficiency_df(pipeline.step, pipeline.allocation)
         cost_df = make_community_cost_df(pipeline.pricing)
+        market_cost_df = make_market_cost_df(
+            pipeline.pricing_market_import,
+            pipeline.pricing_market_export,
+        )
         prosumer_df = make_prosumer_timeseries_df(pipeline.allocation, pipeline.pricing)
         n_prosumers = len(pipeline.allocation.prosumer_ids)
 
@@ -205,7 +210,7 @@ class ResultsPage:
                     y="cost_eur",
                     alpha=0.6,
                     color=_COST_COLOR,
-                    title="Gemeenschapskosten (EUR)",
+                    title="Gemeenschapskosten lokaal delen (EUR)",
                     responsive=True,
                     min_height=280,
                 )
@@ -229,12 +234,45 @@ class ResultsPage:
                         x="timestamp",
                         y="cost_eur",
                         by="meter_id",
-                        title=f"Kosten per prosumer ({n_prosumers} meters)",
+                        title=f"Kosten lokaal delen per prosumer ({n_prosumers} meters)",
                         responsive=True,
                         min_height=280,
                         legend="right",
                     )
                     charts.append(pn.pane.HoloViews(chart6, sizing_mode="stretch_width"))
+
+            # Market cost charts (only when market pricing was run)
+            if not market_cost_df.empty:
+                mc = _filter_resample(market_cost_df, date_range, freq)
+                if not mc.empty:
+                    market_ys = [c for c in ["import_cost_eur", "export_revenue_eur"] if c in mc.columns]
+                    if market_ys:
+                        _MARKET_COLORS = {
+                            "import_cost_eur": _IMPORT_COLOR,
+                            "export_revenue_eur": _SUPPLY_COLOR,
+                        }
+                        colors = [_MARKET_COLORS[y] for y in market_ys]
+                        chart_market = mc.hvplot.area(
+                            x="timestamp",
+                            y=market_ys,
+                            alpha=0.5,
+                            color=colors,
+                            title="Marktkosten: import & export (EUR)",
+                            responsive=True,
+                            min_height=280,
+                            legend="top_left",
+                        )
+                        charts.append(pn.pane.HoloViews(chart_market, sizing_mode="stretch_width"))
+                    if "net_cost_eur" in mc.columns:
+                        chart_net = mc.hvplot.line(
+                            x="timestamp",
+                            y="net_cost_eur",
+                            color=_ALLOC_COLOR,
+                            title="Netto marktkosten (EUR)",
+                            responsive=True,
+                            min_height=240,
+                        )
+                        charts.append(pn.pane.HoloViews(chart_net, sizing_mode="stretch_width"))
 
             return pn.Column(*charts, sizing_mode="stretch_width") if charts else pn.pane.Markdown("Geen gegevens in dit bereik.")
 

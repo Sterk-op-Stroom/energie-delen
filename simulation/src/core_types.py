@@ -62,6 +62,81 @@ class AggregatedStep:
 
 
 @dataclass
+class EnergyFlow:
+    """A directional per-prosumer energy stream, ready for pricing.
+
+    The common input to all PricingModel implementations. Builder functions
+    in src/flows.py construct EnergyFlow objects from upstream pipeline results.
+
+    Attributes:
+        timestamp: Timezone-aware UTC DatetimeIndex.
+        prosumer_ids: Ordered list of meter IDs.
+        kwh: Per-prosumer non-negative kWh arrays, dict[meter_id → float32 (n_timesteps,)].
+        direction: "demand" — energy consumed (cost to prosumer);
+                   "supply" — energy produced (revenue for prosumer).
+        flow_type: Stream identity. One of:
+            "local_shared"          — allocated local energy (consumers)
+            "grid_import"           — residual demand drawn from the grid
+            "grid_export"           — residual supply exported to the grid
+            "counterfactual_import" — full demand without any local sharing
+            "counterfactual_export" — full supply without any local sharing
+        freq: Pandas frequency string (e.g. "15min"), or None.
+        metadata: Optional dict for strategy params, source info, etc.
+    """
+
+    VALID_DIRECTIONS = ("demand", "supply")
+    VALID_FLOW_TYPES = (
+        "local_shared",
+        "grid_import",
+        "grid_export",
+        "counterfactual_import",
+        "counterfactual_export",
+    )
+
+    timestamp: pd.DatetimeIndex
+    prosumer_ids: list[str]
+    kwh: dict[str, np.ndarray]
+    direction: str
+    flow_type: str
+    freq: Optional[str] = None
+    metadata: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        n = len(self.timestamp)
+        if self.direction not in self.VALID_DIRECTIONS:
+            raise ValueError(
+                f"Invalid direction={self.direction!r}. "
+                f"Must be one of: {', '.join(self.VALID_DIRECTIONS)}"
+            )
+        if self.flow_type not in self.VALID_FLOW_TYPES:
+            raise ValueError(
+                f"Invalid flow_type={self.flow_type!r}. "
+                f"Must be one of: {', '.join(self.VALID_FLOW_TYPES)}"
+            )
+        if not self.prosumer_ids:
+            raise ValueError("EnergyFlow must have at least one prosumer_id.")
+        missing = [m for m in self.prosumer_ids if m not in self.kwh]
+        if missing:
+            raise ValueError(
+                f"{len(missing)} prosumer_id(s) have no entry in kwh: {missing[:5]}"
+            )
+        coerced: dict[str, np.ndarray] = {}
+        for meter_id, arr in self.kwh.items():
+            arr = ensure_array(arr, np.float32)
+            if len(arr) != n:
+                raise ValueError(
+                    f"kwh[{meter_id!r}] has length {len(arr)}, expected {n}"
+                )
+            neg_mask = arr < 0
+            if np.any(neg_mask):
+                raise ValueError(
+                    f"kwh[{meter_id!r}] contains negative values. EnergyFlow.kwh must be non-negative."
+                )
+            coerced[meter_id] = arr
+        self.kwh = coerced
+
+
+@dataclass
 class MeterTimeSeries:
     """Time series data for a single meter (prosumer or production asset).
 
@@ -276,6 +351,9 @@ class AllocationResult:
             Equal to: demand_total − sum(allocations).
         grid_export: Community-level unallocated local supply per timestep (kWh), non-negative.
             Equal to: supply_total − sum(allocations).
+        residual_demand: Per-prosumer unmet demand after allocation (kWh), non-negative —
+            dict mapping meter_id → float32 array of shape (n_timesteps,).
+            Populated by run_allocation(); empty dict if not computed.
         strategy: Name of the allocation strategy (e.g. "equal_allocation").
         unit: Unit of values (currently "kWh").
         freq: Frequency string (e.g. "15min"), or None if unknown.
@@ -291,6 +369,7 @@ class AllocationResult:
     unit: str = "kWh"
     freq: Optional[str] = None
     metadata: dict = field(default_factory=dict)
+    residual_demand: dict[str, np.ndarray] = field(default_factory=dict)
 
     def __post_init__(self):
         n = len(self.timestamp)
@@ -308,6 +387,16 @@ class AllocationResult:
             if len(arr) != n:
                 raise ValueError(f"{arr_name} has length {len(arr)}, expected {n}")
             setattr(self, arr_name, arr)
+        if self.residual_demand:
+            coerced_rd: dict[str, np.ndarray] = {}
+            for meter_id, arr in self.residual_demand.items():
+                arr = ensure_array(arr, np.float32)
+                if len(arr) != n:
+                    raise ValueError(
+                        f"residual_demand[{meter_id!r}] has length {len(arr)}, expected {n}"
+                    )
+                coerced_rd[meter_id] = arr
+            self.residual_demand = coerced_rd
 
     def summary(self) -> str:
         allocated = sum(a.sum() for a in self.allocations.values())
@@ -322,31 +411,32 @@ class AllocationResult:
 
 @dataclass
 class PricingResult:
-    """Per-timestep local energy charges for each prosumer.
+    """Per-timestep energy charges for each prosumer.
 
-    Output of the Pricing module. Covers local allocated energy only —
-    grid import/export pricing is an explicit non-goal for Phase 1.
+    Output of the Pricing module. Can cover any energy stream (local allocated,
+    grid import, grid export, counterfactual, etc.) as indicated by flow_type.
 
     Sign convention: all arrays are non-negative EUR values.
 
     Pricing invariants (enforced by pricing strategies):
-        - local_cost_eur[meter_id][t] == allocations[meter_id][t] * fixed_price
-        - total_local_cost_eur[t] == sum(local_cost_eur[:,t])
+        - cost_eur[meter_id][t] == kwh_priced[meter_id][t] * fixed_price
+        - total_cost_eur[t] == sum(cost_eur[:,t])
         - Sign of costs follows sign of fixed_price (negative price = subsidy/rebate).
 
-    NaN convention: NaN allocations are treated as 0 (prosumer absent that timestep).
+    NaN convention: NaN kWh values are treated as 0 (prosumer absent that timestep).
 
     Attributes:
         timestamp: Timezone-aware UTC DatetimeIndex.
-        prosumer_ids: Ordered list of prosumer meter IDs (preserved from AllocationResult).
-        local_cost_eur: Per-prosumer local energy charges —
+        prosumer_ids: Ordered list of prosumer meter IDs.
+        cost_eur: Per-prosumer energy charges —
             dict mapping meter_id → float32 array of shape (n_timesteps,).
-        local_kwh_priced: Per-prosumer kWh that were priced (= allocations, NaN→0) —
+        kwh_priced: Per-prosumer kWh that were priced —
             dict mapping meter_id → float32 array of shape (n_timesteps,).
-        total_local_cost_eur: Community total local energy charges per timestep (EUR).
-        total_local_cost_eur_by_prosumer: Total charges per prosumer over all timesteps —
+        total_cost_eur: Community total energy charges per timestep (EUR).
+        total_cost_eur_by_prosumer: Total charges per prosumer over all timesteps —
             dict mapping meter_id → float.
-        fixed_price_eur_per_kwh: The fixed local price applied (EUR/kWh).
+        fixed_price_eur_per_kwh: The fixed price applied (EUR/kWh).
+        flow_type: The energy stream that was priced (e.g. "local_shared", "grid_import").
         strategy: Name of the pricing strategy (e.g. "fixed_price").
         unit: Unit of monetary values (currently "EUR").
         freq: Frequency string (e.g. "15min"), or None if unknown.
@@ -355,11 +445,12 @@ class PricingResult:
 
     timestamp: pd.DatetimeIndex
     prosumer_ids: list[str]
-    local_cost_eur: dict[str, np.ndarray]        # meter_id → float32 (n_timesteps,)
-    local_kwh_priced: dict[str, np.ndarray]      # meter_id → float32 (n_timesteps,)
-    total_local_cost_eur: np.ndarray             # float32 (n_timesteps,), non-negative
-    total_local_cost_eur_by_prosumer: dict[str, float]
+    cost_eur: dict[str, np.ndarray]              # meter_id → float32 (n_timesteps,)
+    kwh_priced: dict[str, np.ndarray]            # meter_id → float32 (n_timesteps,)
+    total_cost_eur: np.ndarray                   # float32 (n_timesteps,), non-negative
+    total_cost_eur_by_prosumer: dict[str, float]
     fixed_price_eur_per_kwh: float
+    flow_type: str
     strategy: str
     unit: str = "EUR"
     freq: str | None = None
@@ -367,7 +458,7 @@ class PricingResult:
 
     def __post_init__(self):
         n = len(self.timestamp)
-        for field_name in ("local_cost_eur", "local_kwh_priced"):
+        for field_name in ("cost_eur", "kwh_priced"):
             raw = getattr(self, field_name)
             coerced: dict[str, np.ndarray] = {}
             for meter_id, arr in raw.items():
@@ -378,17 +469,17 @@ class PricingResult:
                     )
                 coerced[meter_id] = arr
             setattr(self, field_name, coerced)
-        self.total_local_cost_eur = ensure_array(self.total_local_cost_eur, np.float32)
-        if len(self.total_local_cost_eur) != n:
+        self.total_cost_eur = ensure_array(self.total_cost_eur, np.float32)
+        if len(self.total_cost_eur) != n:
             raise ValueError(
-                f"total_local_cost_eur has length {len(self.total_local_cost_eur)}, expected {n}"
+                f"total_cost_eur has length {len(self.total_cost_eur)}, expected {n}"
             )
 
     def summary(self) -> str:
-        total_eur = float(self.total_local_cost_eur.sum())
-        total_kwh = sum(a.sum() for a in self.local_kwh_priced.values())
+        total_eur = float(self.total_cost_eur.sum())
+        total_kwh = sum(a.sum() for a in self.kwh_priced.values())
         return (
-            f"PricingResult: strategy={self.strategy} | "
+            f"PricingResult: strategy={self.strategy} | flow={self.flow_type} | "
             f"price={self.fixed_price_eur_per_kwh:.4f} EUR/kWh | "
             f"total={total_eur:.2f} EUR | "
             f"priced={float(total_kwh):.1f} kWh"
