@@ -127,7 +127,7 @@ class TimestampValidator:
             series_id: Identifier of the series (for logging).
 
         Returns:
-            Inferred frequency string (e.g., "15min", "1H").
+            Inferred frequency string (e.g., "15min", "h", "D").
 
         Raises:
             ValueError: If frequency cannot be inferred reliably.
@@ -163,23 +163,17 @@ class TimestampValidator:
         # Common intervals: 15min, 30min, 1H, 1D, etc.
         total_seconds = int(delta.total_seconds())
 
-        if total_seconds % 3600 == 0:  # Hourly or longer
+        if total_seconds % 86400 == 0:  # Daily or longer
+            days = total_seconds // 86400
+            return f"{days}D"
+        elif total_seconds % 3600 == 0:  # Hourly
             hours = total_seconds // 3600
-            if hours == 1:
-                return "1H"
-            else:
-                return f"{hours}H"
+            return f"{hours}h"
         elif total_seconds % 60 == 0:  # Minutes
             minutes = total_seconds // 60
-            if minutes == 15:
-                return "15min"
-            elif minutes == 30:
-                return "30min"
-            else:
-                return f"{minutes}min"
+            return f"{minutes}min"
         else:
-            # Seconds or sub-second
-            return f"{total_seconds}S"
+            return f"{total_seconds}s"
 
     @classmethod
     def _find_gaps(cls, timestamps: pd.DatetimeIndex, freq: str) -> list[tuple]:

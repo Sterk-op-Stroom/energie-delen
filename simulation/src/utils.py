@@ -30,9 +30,12 @@ def infer_freq(timestamp: pd.DatetimeIndex) -> str | None:
     total_seconds = int(delta.total_seconds())
     if total_seconds <= 0:
         return None
+    if total_seconds % 86400 == 0:
+        days = total_seconds // 86400
+        return f"{days}D"
     if total_seconds % 3600 == 0:
         hours = total_seconds // 3600
-        return "1H" if hours == 1 else f"{hours}H"
+        return f"{hours}h"
     if total_seconds % 60 == 0:
         return f"{total_seconds // 60}min"
-    return f"{total_seconds}S"
+    return f"{total_seconds}s"
