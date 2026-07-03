@@ -1,266 +1,159 @@
-# Dashboard — User Guide
+# Dashboard — Gebruikersgids
 
-The dashboard is the primary way to use Energie Delen. It is a browser-based interface that walks you through the full simulation workflow without needing to use the command line.
-
----
-
-## Starting the dashboard
-
-### Windows
-
-Double-click `launch_dashboard.bat`, or run it from a terminal:
-
-```
-launch_dashboard.bat
-```
-
-### macOS / Linux
-
-```bash
-./launch_dashboard.sh
-```
-
-The dashboard is served at `http://localhost:5006`. If the browser does not open automatically, navigate there manually.
-
-### Manual start from the command line (advanced)
-
-```bash
-uv run --group dashboard panel serve dashboard/app.py --show
-```
-
-Add `--autoreload` during development to reload on code changes.
+Het Energie Delen dashboard is een browserinterface voor het uitvoeren van energiedeelsimulaties. Geen programmeerkennis nodig.
 
 ---
 
-## Workflow overview
+## Installatie en opstarten
 
-The dashboard is split into three pages, navigated with the sidebar buttons on the left.
+### Stap 1 — Download het project
 
-```
-1 · Data Input  →  2 · Simulation  →  3 · Results
-```
+[Download de zip](https://github.com/Sterk-op-Stroom/energie-delen/archive/refs/heads/main.zip) en pak hem uit op een plek naar keuze.
 
-You must complete each step in order. The **Results** button stays disabled until a simulation has been run successfully.
+### Stap 2 — Start het dashboard
 
----
+Ga naar de uitgepakte map en open de `simulation/` map. Start het dashboard:
 
-## Page 1 — Data Input
+**Windows:** dubbelklik op `launch_dashboard.bat`  
+**macOS / Linux:** voer `./launch_dashboard.sh` uit in de terminal
 
-This page loads your data and gives you a first look at its quality before you configure the simulation.
-
-### Step 1: Select your data
-
-You have three options:
-
-| Option | When to use |
-|--------|-------------|
-| **Laad voorbeelddata** | First-time users; generates 5 prosumers + 2 production assets for 7 days |
-| **Type or paste a file/folder path** | You have Parquet files on disk |
-| **Upload a file** | You want to drag-and-drop a single `.parquet` file from your computer |
-
-Two types of data can be supplied:
-- **Prosumer data** — smart meter readings for each household (positive = consumption, negative = net injection)
-- **Production assets** — output of shared generation assets (solar panels, etc.)
-
-See `docs/data_formats.md` for the required Parquet schema to prepare your data.
-
-#### Stacking and combining files
-
-Every upload is remembered — files are not replaced when you upload a new one. Instead each upload is appended to its own per-role list (prosumer files, production files separately).
-
-Click **Geselecteerde bestanden (x/n geselecteerd)** (below the action buttons) to expand the file list. It shows two independent columns:
-
-| Column | Contents |
-|--------|----------|
-| **Prosumers** | All uploaded prosumer files |
-| **Productie-assets** | All uploaded production-asset files |
-
-Each entry has:
-
-| Control | Action |
-|---------|--------|
-| **☑ checkbox** (left) | Include this file in the active selection. Any combination across both columns can be checked simultaneously. |
-| **🗑** (right) | Remove this entry from the list and delete its temp file. |
-
-When **Laad & inspecteer** is clicked (see Step 2), all checked files for each role are merged and loaded together. If only one file is checked per role, it is used directly; if multiple are checked they are combined into a temporary directory that the loader auto-discovers. You can change the selection at any time and re-inspect without losing other uploaded files.
-
-### Step 2: Load & Inspect
-
-Click **Laad & inspecteer**. The dashboard will:
-
-1. Scan all meters.
-2. Display a table listing every meter: its ID, time range, number of data points, inferred frequency, and percentage of missing values.
-3. Show three interactive coverage charts:
-
-| Chart | What it shows |
-|-------|---------------|
-| **Tijdlijn** | How many meters have data at every point in time (stacked area) |
-| **Dekkingsheatmap** | Per-meter coverage fraction across time periods (green = full, red = gaps). Switch between **Dagelijks / Wekelijks / Maandelijks / Kwartaal** resolution. |
-| **Ontbrekend %** | Horizontal bar chart ranking meters by their missing-data fraction |
-
-Above the charts you will see the **Inspectierapport** summary:
-
-| Field | Meaning |
-|-------|---------|
-| Voorgestelde start / Voorgesteld einde | The longest period where all meters overlap |
-| Voorgestelde frequentie | The most common interval detected across meters |
-| Volledige periode | Number of days in the overlap window |
-| Frequentie consistent | Whether all meters share the same sampling frequency (`ja` / `nee ⚠`) |
-
-### Step 3: Proceed
-
-Click **Volgende: Simulatie-instellingen →** to move to the next page. The suggested start, end, and frequency are pre-filled in the simulation form automatically. Adjust the settings as desired.
+Het dashboard opent automatisch in je browser op `http://localhost:5006`.
 
 ---
 
-## Page 2 — Simulation Settings
+## Overzicht
 
-Configure and run the pipeline.
-
-### Parameters
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| **Start date** | Simulation window start (DD-MM-YYYY) | From inspect |
-| **End date** | Simulation window end (DD-MM-YYYY) | From inspect |
-| **Pricing model (local sharing)** | Strategy for pricing locally shared energy. Currently only **Vaste prijs** (fixed price) is available. | `Vaste prijs` |
-| **Local price (EUR/kWh)** | Fixed price charged per kWh of locally allocated energy | `0.075` |
-| **Market pricing model** | Optional pricing for residual grid flows. Select **Geen** to skip, **Vaste prijs** to set fixed import/export prices. | `Geen` |
-| **Market import price (EUR/kWh)** | Price paid per kWh drawn from the grid after local sharing (visible when market pricing is active) | `0.25` |
-| **Export compensation price (EUR/kWh)** | Revenue received per kWh exported to the grid after local sharing (visible when market pricing is active) | `0.09` |
-| **Frequency** | Timestep resolution — enter a number and choose `min` or `sec` (e.g. 15 min, 30 sec). Toggle **Automatisch detecteren** to use the frequency inferred from the data. | From inspect |
-| **Missing data policy** | How to handle gaps in meter data | `fill_zero` |
-| **NaN policy** | How NaN values behave during aggregation | `treat_as_zero` |
-
-The **Frequency**, **Missing data policy**, and **NaN policy** fields are hidden inside the collapsed **Geavanceerde instellingen** card. Click it to expand.
-
-#### Missing data policy options
-
-| Option | Behaviour |
-|--------|-----------|
-| `fill_zero` | Missing timesteps are treated as zero consumption / production |
-| `fill_forward` | Gaps are filled by propagating the last known value |
-| `keep_nan` | Gaps remain as NaN and propagate through the pipeline |
-| `error` | The run fails immediately if any meter has missing data |
-
-#### NaN policy options
-
-| Option | Behaviour |
-|--------|-----------|
-| `treat_as_zero` | NaN values contribute 0 to supply/demand totals |
-| `propagate` | Any NaN at a timestep makes that timestep's total NaN |
-
-### Running the simulation
-
-Click **Simulatie starten**. The **Pipeline-logboek** area shows the output from each pipeline stage (loader → aggregator → allocator → pricing).
-
-On success, a row of **KPI cards** appears immediately:
-
-**Energy (kWh)**
-- Total Demand — total consumption over the period
-- Total Supply — total locally generated energy
-- Locally Allocated — local supply actually distributed to prosumers
-- Grid Import — demand not met locally; drawn from the public grid
-- Grid Export — local supply not consumed locally; fed back to the grid
-
-**Efficiency (%)**
-- Self-Sufficiency — share of total demand covered by local supply
-- Self-Consumption — share of local supply consumed within the community
-
-**Cost (EUR)**
-- Community Cost — total charge for locally allocated energy across all prosumers
-
-**Market Cost (EUR)** — shown only when **Prijsmodel markt** is configured
-- Market Import Cost — total grid import charges after local sharing
-- Market Export Revenue — total grid export revenues after local sharing
-- Net Market Cost — import cost minus export revenue
-
-Click **Bekijk resultaten →** to open the full results explorer.
+Het dashboard heeft drie pagina's die je in volgorde doorloopt: **Data-invoer → Simulatie → Resultaten**.
 
 ---
 
-## Page 3 — Results
+## Pagina 1 — Data-invoer
 
-The results page has two tabs.
+### Data laden
 
-### Tab 1 — Verkennen
+Je hebt twee soorten data nodig:
 
-Interactive time-series charts with the option to download them. Two controls apply to all charts:
+- **Prosumerdata** — slimme metergegevens per huishouden (kWh; positief = verbruik, negatief = teruglevering)
+- **Productie-assets** — opbrengst van gedeelde opwekinstallaties (zonnepanelen, windturbine)
 
-- **Datumbereik** slider — zoom into any sub-period of the simulation window
-- **Aggregatie** selector — view raw data (**Onbewerkt (15 min)**), or resample to **Per uur / Dagelijks / Wekelijks**
+Beide moeten in Parquet-formaat zijn. Zie `docs/data_formats.md` voor het vereiste schema.
 
-Four sub-tabs:
+Je hebt drie manieren om data te laden:
 
-#### Energiestromen
-- **Aanbod vs Vraag (kWh)** — stacked area chart comparing total community demand (blue) and available local supply (green)
-- **Energiestromen (kWh)** — stacked area showing locally allocated energy (amber) and grid import (red), with grid export (purple) as a line overlay
+| Optie | Wanneer |
+|---|---|
+| **Laad voorbeelddata** | Geen eigen data beschikbaar; genereert 5 prosumers en 2 assets over 7 dagen om het dashboard te verkennen |
+| **Pad invoeren** | Je hebt Parquet-bestanden op schijf staan |
+| **Bestand uploaden** | Je wilt een bestand slepen of selecteren vanuit je bestandsbeheer |
 
-#### Zelfvoorzienendheid & consumptie
-- **Zelfvoorzieningspercentage** — ratio of local allocation to total demand over time
-- **Zelfconsumptiepercentage** — ratio of local allocation to total supply over time
-- **Toewijzing per prosumer** — individual meter allocation lines (shown when ≤ 20 prosumers)
+Elk geüpload bestand wordt aan een lijst toegevoegd — uploaden overschrijft niet. Vouw **Geselecteerde bestanden** uit om te zien welke bestanden er staan. Per bestand kun je:
+- het **vinkje** aan- of uitzetten om te bepalen of het meegenomen wordt
+- het **prullenbakpictogram** (🗑) gebruiken om het uit de lijst te verwijderen
 
-#### Kosten
-- **Gemeenschapskosten lokaal delen (EUR)** — total EUR cost of locally shared energy over time
-- **Kosten lokaal delen per prosumer** — individual meter cost lines (shown when ≤ 20 prosumers)
-- **Marktkosten: import & export (EUR)** — area chart of grid import costs (red) and export revenues (green) per timestep (shown when market pricing is configured)
-- **Netto marktkosten (EUR)** — net market cost per timestep: import cost minus export revenue (shown when both market import and export prices are configured)
+Als je meerdere bestanden per rol aanvinkt (bijv. twee prosumerbestanden), worden ze automatisch samengevoegd. Dit is handig als je data per maand of per meter in aparte bestanden hebt.
 
-#### Gemiddeld profiel
-Aggregates all timesteps by time-of-day / week / year to reveal structural patterns:
+### Inspecteren
 
-| Profile | X-axis | Use |
-|---------|--------|-----|
-| **Dagelijks** | Hour of day (0–24) | Morning/evening peaks |
-| **Wekelijks** | Day of week (Ma–Zo) | Weekday vs weekend patterns |
-| **Jaarlijks** | Day of year | Seasonal variation |
+Klik op **Laad & inspecteer**. Het dashboard toont:
 
-Each profile shows mean supply (green) and demand (blue) as overlaid area charts.
+- Een tabel met alle meters: ID, tijdsbereik, aantal datapunten, frequentie en percentage ontbrekende waarden
+- Een **tijdlijn** die laat zien hoeveel meters op elk moment data hebben
+- Een **dekkingsheatmap** per meter (groen = volledig, rood = gaten) — schakelbaar tussen dag/week/maand/kwartaal
+- Een **ontbrekend %**-grafiek die meters rangschikt op hoeveel data er ontbreekt
 
-### Tab 2 — Prosumertabel
+Boven de grafieken zie je het **Inspectierapport**:
 
-A paginated table with one row per prosumer, summarising their totals for the simulation period: allocated kWh, grid import, self-sufficiency rate, and local sharing cost in EUR. When **Prijsmodel markt** is configured, three additional columns appear: market import cost, market export revenue, and net market cost per prosumer.
+| Veld | Betekenis |
+|---|---|
+| Voorgestelde start / einde | Langste periode waarop alle meters overlap hebben |
+| Voorgestelde frequentie | Meest voorkomend interval over alle meters |
+| Frequentie consistent | Of alle meters hetzelfde interval gebruiken (`ja` / `nee ⚠`) |
 
-Two download buttons:
-
-| Button | File | Contents |
-|--------|------|----------|
-| **Download prosumer-CSV** | `prosumer_summary.csv` | One row per prosumer, aggregated totals |
-| **Download tijdreeks-CSV** | `timeseries.csv` | Full timestep-level data for every prosumer |
+Klik op **Volgende: Simulatie-instellingen →** om verder te gaan. De voorgestelde waarden worden automatisch ingevuld op de volgende pagina.
 
 ---
 
-## Data flow summary
+## Pagina 2 — Simulatie
 
-```
-Data Input page
-  └─ prosumer_files[] + production_files[]  (stacked upload history)
-  └─ selected_prosumer_indices + selected_production_indices → prosumer_path + production_path
-        ↓  inspect_dataset()
-  └─ inspect_result (meter list, coverage, suggested config)
+### Instellingen
 
-Simulation page
-  └─ pricing settings (local price, optional market import/export prices)
-  └─ SimulationConfig (start, end, freq, missing_data, nan_policy)
-        ↓  run_pipeline()
-  └─ PipelineResult
-       ├─ dataset → step → allocation → pricing  (local sharing)
-       ├─ pricing_market_import  (optional — grid import costs)
-       └─ pricing_market_export  (optional — grid export revenues)
+**Datumbereik** — start- en einddatum van de simulatie (DD-MM-JJJJ). Standaard de langste overlap uit de inspectie.
 
-Results page
-  └─ reads PipelineResult (read-only)
-  └─ interactive charts + CSV export
-```
+Het dashboard werkt met drie lagen van prijzen. Elke laag is optioneel bovenop de vorige:
+
+**1 · Lokale prijs (EUR/kWh)** — het tarief dat prosumers onderling betalen voor lokaal gedeelde energie. Dit is de kern van het P2P-model: alleen de kWh die daadwerkelijk lokaal is gedeeld, wordt hiermee geprijsd. Doorgaans lager dan het markttarief; typisch rond de €0,075 voor Nederlandse energiecoöperaties.
+
+**2 · Prijsmodel markt** — wat er met de resterende netstromen gebeurt *na* lokaal delen. Niet al het verbruik kan lokaal worden gedekt (er is altijd netimport), en niet alle opwek wordt lokaal verbruikt (er is altijd netexport). Deze laag voegt de bijbehorende kosten en opbrengsten toe:
+- **Geen** — alleen lokale kosten worden berekend
+- **Vaste prijs** — vul een importprijs (wat leden betalen voor resterende netimport) en een exportvergoeding (wat de coöperatie ontvangt voor resterende netexport) in
+
+  Samen met de lokale prijs geeft dit het complete kostenplaatje *met* lokaal delen: lokale kosten + netto marktkosten.
+
+**3 · Prijsmodel energieleverancier (vergelijking)** — de counterfactual: wat hadden leden betaald als er *geen* lokaal delen was geweest? Dan zou al het verbruik van het net zijn gekomen en alle opwek direct zijn teruggeleverd. Door dezelfde importprijs en exportvergoeding als bij het markttarief in te vullen, zie je naast de werkelijke kosten ook wat de situatie zonder coöperatie zou zijn geweest. Het verschil tussen de twee is de besparing van het energiedelen.
+
+**Geavanceerde instellingen** (ingeklapt):
+
+- **Frequentie** — tijdstapresolutie (bijv. 15 min). Standaard automatisch gedetecteerd vanuit de data.
+- **Ontbrekende data** — hoe gaten in meterdata worden behandeld:
+
+  | Optie | Gedrag |
+  |---|---|
+  | `fill_zero` | Ontbrekende tijdstappen tellen als nul |
+  | `fill_forward` | Gaten worden gevuld met de laatste bekende waarde — zinvol als meters soms uitvallen maar het verbruik doorgaat |
+  | `keep_nan` | Gaten blijven NaN en propageren door de pipeline |
+  | `error` | De simulatie stopt direct als er ontbrekende data is |
+
+- **NaN-beleid** — hoe NaN-waarden meewegen in de aggregatie:
+
+  | Optie | Gedrag |
+  |---|---|
+  | `treat_as_zero` | NaN-waarden tellen als nul in de som |
+  | `propagate` | Eén NaN op een tijdstap maakt het totaal van dat tijdstap NaN |
+
+### Uitvoeren
+
+Klik op **Simulatie starten**. Het **Pipeline-logboek** toont de voortgang per stap. Bij succes verschijnen de KPI-kaarten:
+
+**Energie (kWh):** totale vraag, totaal aanbod, lokaal toegewezen, netimport, netexport  
+**Efficiëntie (%):** zelfvoorzieningspercentage (hoeveel vraag lokaal werd gedekt), zelfconsumptiepercentage (hoeveel lokale opwek intern werd verbruikt)  
+**Kosten (EUR):** bedrag voor lokaal gedeelde energie (lokale prijs × lokaal toegewezen kWh)  
+**Marktkosten (EUR):** zichtbaar als marktprijzen zijn ingesteld — importkosten, exportopbrengst en netto marktkosten voor de resterende netstromen na lokaal delen  
+**Vergelijking energieleverancier (EUR):** zichtbaar als de counterfactual is ingesteld — dezelfde drie cijfers, maar dan voor de situatie zonder lokaal delen; het verschil met de marktkosten is de besparing
+
+Klik op **Bekijk resultaten →** om door te gaan.
 
 ---
 
-## Tips
+## Pagina 3 — Resultaten
 
-- **No data yet?** Use **Laad voorbeelddata** on the Data Input page to generate a working dataset instantly.
-- **Frequency mismatch warning?** The inspect step will flag it. Check that all meter files use the same sampling interval.
-- **No overlap warning?** Your prosumer and production files cover different time windows. Check that their date ranges intersect.
-- **Results button is greyed out?** A simulation has not been run yet on this session. Complete page 2 first.
-- **Re-running with different settings:** Go back to page 2 at any time and click **Simulatie starten** again. The results page updates automatically.
-- **Testing different data combinations:** Upload multiple prosumer or production files, then use the **Geselecteerde bestanden** panel to check any combination, re-inspect, and run — without re-uploading.
+### Verkennen
+
+Twee knoppen gelden voor alle grafieken:
+- **Datumbereik** — zoom in op een deelperiode van het gesimuleerde venster
+- **Aggregatie** — bekijk ruwe data (15 min) of resample naar uur / dag / week
+
+De grafieken zijn verdeeld over vier tabbladen:
+
+**Energiestromen** — aanbod vs. vraag, en de verdeling over lokaal gedeeld / netimport / netexport  
+**Zelfvoorzienendheid & consumptie** — zelfvoorzienings- en zelfconsumptiepercentage over tijd, plus toewijzing per prosumer (bij ≤ 20 prosumers)  
+**Kosten** — gemeenschapskosten en kosten per prosumer; marktkosten als marktprijzen zijn ingesteld  
+**Gemiddeld profiel** — aggregeert alle tijdstappen naar tijdstip van de dag, dag van de week of dag van het jaar, om structurele patronen zichtbaar te maken (bijv. ochtend-/avondpieken, seizoensvariatie)
+
+### Prosumertabel
+
+Een tabel met één rij per prosumer: toegewezen kWh, netimport, zelfvoorzieningsgraad en kosten lokaal delen. Bij marktprijzen komen hier drie kolommen bij: marktimportkosten, marktexportopbrengst en netto marktkosten.
+
+Twee downloadknoppen:
+- **Download prosumer-CSV** — geaggregeerde totalen per prosumer over de hele periode
+- **Download tijdreeks-CSV** — volledige tijdstapdata per prosumer
+
+---
+
+## Veelgestelde problemen
+
+| Symptoom | Oplossing |
+|---|---|
+| Resultaten-knop is grijs | Voer eerst een simulatie uit op pagina 2 |
+| "Geen overlap"-waarschuwing | Prosumer- en productiebestanden dekken verschillende periodes; controleer de datumbereiken |
+| Frequentie inconsistent ⚠ | Niet alle meters hebben hetzelfde interval; gebruik alleen bestanden met dezelfde frequentie |
+| Andere instellingen proberen | Ga terug naar pagina 2, pas aan en klik opnieuw op **Simulatie starten** — resultaten worden direct bijgewerkt |

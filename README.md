@@ -10,7 +10,13 @@ It brings together two things:
 
 The core philosophy is modularity and reuse: communities should be able to adapt pricing models, allocation rules, and organizational choices without rebuilding everything from scratch. The simulation framework is explicitly designed to make those choices visible, comparable, and debatable—technically, socially, and politically.
 
+## Simulation
 
+The `simulation/` directory contains the core energy sharing simulation. It takes meter data from households and local renewable production sources, and models what happens when they share that energy before drawing from the grid — who gets what, at what cost, and how self-sufficient the community is.
+
+It runs through your data timestep by timestep and produces per-prosumer results: energy allocated, residual grid usage, and costs — both under local sharing and as a counterfactual (what each member would have paid without it).
+
+**Start here:** [`simulation/README.md`](simulation/README.md)  
 
 ## Licensing
 
